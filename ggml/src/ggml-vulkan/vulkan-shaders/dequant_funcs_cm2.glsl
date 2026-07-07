@@ -746,7 +746,7 @@ f16vec4 dequantFuncQ6_K_v(const in decodeBufQ6_K bl, const in uint blockCoords[2
     return f16vec4((vec4(qi) - vec4(32.0f)) * vec4(float(dscale)));
 }
 
-#if defined(DATA_A_IQ1_S)
+#if defined(DATA_A_IQ1_S) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ1_S {
    block_iq1_s block;
 };
@@ -793,7 +793,7 @@ f16vec4 dequantFuncIQ1_S_v(const in decodeBufIQ1_S bl, const in uint blockCoords
 }
 #endif
 
-#if defined(DATA_A_IQ1_M)
+#if defined(DATA_A_IQ1_M) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ1_M {
    block_iq1_m block;
 };
@@ -852,7 +852,7 @@ f16vec4 dequantFuncIQ1_M_v(const in decodeBufIQ1_M bl, const in uint blockCoords
 }
 #endif
 
-#if defined(DATA_A_IQ2_XXS)
+#if defined(DATA_A_IQ2_XXS) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ2_XXS {
    block_iq2_xxs block;
 };
@@ -914,7 +914,7 @@ f16vec4 dequantFuncIQ2_XXS_v(const in decodeBufIQ2_XXS bl, const in uint blockCo
 }
 #endif
 
-#if defined(DATA_A_IQ2_XS)
+#if defined(DATA_A_IQ2_XS) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ2_XS {
    block_iq2_xs block;
 };
@@ -967,7 +967,7 @@ f16vec4 dequantFuncIQ2_XS_v(const in decodeBufIQ2_XS bl, const in uint blockCoor
 }
 #endif
 
-#if defined(DATA_A_IQ2_S)
+#if defined(DATA_A_IQ2_S) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ2_S {
    block_iq2_s block;
 };
@@ -983,7 +983,7 @@ float16_t dequantFuncIQ2_S(const in decodeBufIQ2_S bl, const in uint blockCoords
     const uint scale = (bl.block.scales[ib32] >> ((idx & 0x10) >> 2)) & 0xf;
     const uint qs = bl.block.qs[ib8];
     const uint qh = bl.block.qh[ib32];
-    const uint sign = bl.block.qs[QUANT_K / 8 + ib8] >> (idx & 0x6);
+    const uint sign = bl.block.qs[QUANT_K_IQ2_S / 8 + ib8] >> (idx & 0x6);
 
     const float d = float(bl.block.d);
     const float db = d * 0.25 * (0.5 + scale);
@@ -1005,7 +1005,7 @@ f16vec4 dequantFuncIQ2_S_v(const in decodeBufIQ2_S bl, const in uint blockCoords
     const uint scale = (bl.block.scales[ib32] >> ((idx & 0x10) >> 2)) & 0xf;
     const uint qs    = bl.block.qs[ib8];
     const uint qh    = bl.block.qh[ib32];
-    const uint sb    = uint(bl.block.qs[QUANT_K / 8 + ib8]) >> (idx & 0x6u);
+    const uint sb    = uint(bl.block.qs[QUANT_K_IQ2_S / 8 + ib8]) >> (idx & 0x6u);
 
     const float d  = float(bl.block.d);
     const float db = d * 0.25 * (0.5 + scale);
@@ -1021,7 +1021,7 @@ f16vec4 dequantFuncIQ2_S_v(const in decodeBufIQ2_S bl, const in uint blockCoords
 }
 #endif
 
-#if defined(DATA_A_IQ3_XXS)
+#if defined(DATA_A_IQ3_XXS) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ3_XXS {
    block_iq3_xxs block;
 };
@@ -1036,7 +1036,7 @@ float16_t dequantFuncIQ3_XXS(const in decodeBufIQ3_XXS bl, const in uint blockCo
     uint idx = coordInBlock[1];
 
     const uint iqs = (idx & 0xFC) >> 2;             // 0..63
-    const uint is = QUANT_K / 4 + ((idx & 0xE0) >> 3);// 8 values
+    const uint is = QUANT_K_IQ3_XXS / 4 + ((idx & 0xE0) >> 3);// 8 values
 
     const float d = float(bl.block.d);
     const uint qs = bl.block.qs[iqs];
@@ -1059,7 +1059,7 @@ f16vec4 dequantFuncIQ3_XXS_v(const in decodeBufIQ3_XXS bl, const in uint blockCo
     const uint idx = coordInBlock[1];
 
     const uint iqs = idx >> 2;
-    const uint is  = QUANT_K / 4 + ((idx & 0xE0) >> 3);
+    const uint is  = QUANT_K_IQ3_XXS / 4 + ((idx & 0xE0) >> 3);
 
     const float d     = float(bl.block.d);
     const uint  qs    = bl.block.qs[iqs];
@@ -1080,7 +1080,7 @@ f16vec4 dequantFuncIQ3_XXS_v(const in decodeBufIQ3_XXS bl, const in uint blockCo
 }
 #endif
 
-#if defined(DATA_A_IQ3_S)
+#if defined(DATA_A_IQ3_S) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ3_S {
    block_iq3_s block;
 };
@@ -1130,7 +1130,7 @@ f16vec4 dequantFuncIQ3_S_v(const in decodeBufIQ3_S bl, const in uint blockCoords
 }
 #endif
 
-#if defined(DATA_A_IQ4_XS)
+#if defined(DATA_A_IQ4_XS) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ4_XS {
    block_iq4_xs block;
 };
@@ -1180,7 +1180,7 @@ f16vec4 dequantFuncIQ4_XS_v(const in decodeBufIQ4_XS bl, const in uint blockCoor
 }
 #endif
 
-#if defined(DATA_A_IQ4_NL)
+#if defined(DATA_A_IQ4_NL) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufIQ4_NL {
    block_iq4_nl block;
 };
@@ -1221,7 +1221,7 @@ f16vec4 dequantFuncIQ4_NL_v(const in decodeBufIQ4_NL bl, const in uint blockCoor
 }
 #endif
 
-#if defined(DATA_A_MXFP4)
+#if defined(DATA_A_MXFP4) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufMXFP4 {
    block_mxfp4 block;
 };
@@ -1275,7 +1275,7 @@ f16vec4 dequantFuncMXFP4_v(const in decodeBufMXFP4 bl, const in uint blockCoords
 }
 #endif
 
-#if defined(DATA_A_NVFP4)
+#if defined(DATA_A_NVFP4) || defined(MULMAT_QUANT)
 layout(buffer_reference, std430, buffer_reference_align = 4) buffer decodeBufNVFP4 {
    block_nvfp4 block;
 };
