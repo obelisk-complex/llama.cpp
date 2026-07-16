@@ -159,6 +159,7 @@ static llama_ubatch dsv4_build_raw_write_ubatch(const llama_ubatch & ubatch) {
         /*.token        =*/ data->token.empty() ? nullptr : data->token.data(),
         /*.embd         =*/ nullptr,
         /*.pos          =*/ data->pos.data(),
+        /*.token_type   =*/ nullptr,
         /*.n_seq_id     =*/ data->n_seq_id.data(),
         /*.seq_id       =*/ data->seq_id.data(),
         /*.seq_id_unq   =*/ data->seq_id_unq.data(),
