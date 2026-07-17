@@ -5101,6 +5101,10 @@ void server_routes::init_routes() {
         }
 
         int top_n = json_value(body, "top_n", (int)documents.size());
+        if (top_n < 0) {
+            res->error(format_error_response("\"top_n\" must be a non-negative integer", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
 
         const bool is_causal_reranker = !llama_model_has_cls_head(ctx_server.model_tgt);
 
