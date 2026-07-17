@@ -4,61 +4,58 @@
 > **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-rerank-patches`) maintained for the
 > [wikiq](https://github.com/obelisk-complex/wikiq) project. Branched from release `b10046`, it carries:
 >
-> - Upstream PR [ggml-org/llama.cpp#21729](https://github.com/ggml-org/llama.cpp/pull/21729) (squashed) — adds `token_type_ids` input for rerank models with type-embedding.
-> - Upstream PR [ggml-org/llama.cpp#25448](https://github.com/ggml-org/llama.cpp/pull/25448) (cherry-picked) — causal-LM reranker support via logit-margin scoring.
+> - Upstream PR [ggml-org/llama.cpp#21729](https://github.com/ggml-org/llama.cpp/pull/21729) (squashed): adds `token_type_ids` input for rerank models with type-embedding.
+> - Upstream PR [ggml-org/llama.cpp#25448](https://github.com/ggml-org/llama.cpp/pull/25448) (cherry-picked): causal-LM reranker support via logit-margin scoring.
 > - Four local rerank-fidelity fixes for `jina-bert-v2` (jinaai/jina-reranker-v1-turbo-en and siblings).
 >
-> **Why:** wikiq uses jina-reranker-v1-turbo-en as its rerank stage — the step that takes a first-pass
+> **Why:** wikiq uses jina-reranker-v1-turbo-en as its rerank stage, the step that takes a first-pass
 > retrieval and puts the actually-relevant documents at the top before they're shown to a user or fed
 > to an LLM. On stock llama.cpp + the official `ggml-org/jina-reranker-v1-turbo-en-GGUF` conversion,
-> this stage was **silently wrong**: no crash, no error, no NaN — it just returned a confidently
+> this stage was silently wrong: no crash, no error, no NaN; it just returned a confidently
 > plausible-looking ranking that didn't match what the actual model would say. Raw scores were
 > compressed into a narrow band (real range ~0.04-0.20, llama.cpp was returning ~0.06-0.08 for
 > everything) and the resulting order was scrambled hard enough that the top real match (per the real
 > model) could land in 3rd or 4th place. A wikiq CI gate that diffs live rerank order against genuine
-> HF reference scores (rather than trusting llama.cpp's output on faith) is what caught this — nothing
+> HF reference scores (rather than trusting llama.cpp's output on faith) is what caught this; nothing
 > upstream flagged it, and a search of ggml-org/llama.cpp's issues/PRs at the time found no existing
 > report of any of the four causes below.
 >
 > **What was actually wrong**, most-to-least impactful:
->   1. **Classification head layout** — the official GGUF conversion omits the `pooler.dense` layer HF's
+>   1. **Classification head layout.** The official GGUF conversion omits the `pooler.dense` layer HF's
 >      forward pass actually applies before the classifier; llama.cpp was running `tanh(classifier(CLS))`
 >      instead of the real `classifier(tanh(pooler_dense(CLS)))`. This alone accounts for most of the
 >      score compression. Loader (`src/models/jina-bert-v2.cpp`) now supports both the single-tensor
 >      direct-projection layout and this pooler-style two-tensor layout; the GGUF itself still needs
->      rebuilding to supply the missing tensors — see
+>      rebuilding to supply the missing tensors: see
 >      [`scripts/fix-rerank-gguf.py`](https://github.com/obelisk-complex/wikiq/blob/master/scripts/fix-rerank-gguf.py)
 >      in the wikiq repo.
->   2. **Tokenizer** — `jina-v1-en` was sharing `GPT2`'s byte-level pre-tokenizer with unrelated
->      tokenizer families, silently dropping every uppercase codepoint ("Which" tokenized as if it read
+>   2. **Tokeniser:** `jina-v1-en` was sharing `GPT2`'s byte-level pre-tokeniser with unrelated
+>      tokeniser families, silently dropping every uppercase codepoint ("Which" tokenised as if it read
 >      "hich") and mis-splitting mixed alphanumerics ("v2", "m3"). Any query or document with capitals
 >      or version-like tokens was scored against a corrupted input. New dedicated
 >      `LLAMA_VOCAB_PRE_TYPE_JINA_V1_EN` (`src/llama-vocab.{h,cpp}`) with the model's real word-level,
->      lowercase-normalized tokenization.
->   3. **ALiBi head slopes** — jina-bert-v2's reference implementation halves the interpolated ALiBi
+>      lowercase-normalised tokenisation.
+>   3. **ALiBi head slopes:** jina-bert-v2's reference implementation halves the interpolated ALiBi
 >      slope for 4 of its 12 attention heads (a documented "quick fix" in its own `modeling_bert.py`);
 >      ggml's slope table has no way to express that, so those 4 heads applied roughly double the
 >      intended distance penalty on every layer, on every token, compounding across the whole forward
 >      pass. Loader now supports head-padding to 16 heads so the fixed GGUF (above) can permute real
 >      heads onto ggml's matching standard slopes.
->   4. **GELU approximation** — HF's `JinaBertGLUMLP` uses the exact erf-form GELU, not the tanh
->      approximation `build_ffn` had wired up for this arch — a smaller (~0.003) but real contribution
+>   4. **GELU approximation.** HF's `JinaBertGLUMLP` uses the exact erf-form GELU, not the tanh
+>      approximation `build_ffn` had wired up for this arch, a smaller (~0.003) but real contribution
 >      to the mismatch. New `LLM_FFN_GELU_ERF`/`LLM_FFN_GEGLU_ERF` ops (`src/llama-graph.{h,cpp}`), used
 >      only by `LLM_ARCH_JINA_BERT_V2`.
 >
 > **What this fixes in practice:** jina-reranker-v1-turbo-en can now actually be trusted as a rerank
-> stage on this fork — verified against the real HF forward pass, not assumed correct because it runs
-> without error. Live scores agree with the real HF reference within ±0.005 (raw logit) and rank order
-> matches exactly on wikiq's conformance fixture, including a near-tied pair the pre-fix build got
-> wrong. Before this, any pipeline built on this model + llama.cpp's stock support was reordering
-> results in a way nobody would notice without an independent reference to check against — the failure
-> mode is invisible unless you go looking for it, which is exactly what a "the server started and
-> answered, ship it" check would miss.
+> stage on this fork, verified against the real HF forward pass rather than assumed correct because it
+> runs without error. Live scores agree with the real HF reference within ±0.005 (raw logit) and rank
+> order matches exactly on wikiq's conformance fixture, including a near-tied pair the pre-fix build
+> got wrong.
 >
 > See commit `afc212c` for the full technical writeup of the fixes above, and `9879b66` for an
 > unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path.
 >
-> This is a private-purpose fork, not a source for upstream PRs — see [`AGENTS.md`](AGENTS.md) for why.
+> This is a private-purpose fork, not a source for upstream PRs: see [`AGENTS.md`](AGENTS.md) for why.
 
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
