@@ -1563,6 +1563,11 @@ server_tokens format_prompt_rerank(
 
     const char * rerank_prompt = llama_model_chat_template(model, "rerank");
     auto vocab_size = llama_vocab_n_tokens(vocab);
+    // mark document tokens with token_type_ids = 1 only when the model has a
+    // second token-type row; XLM-RoBERTa rerankers have type_vocab_size = 1
+    // and their reference tokenizer emits all-zero token_type_ids, so marking
+    // would index past the end of the single-row type-embedding table
+    const bool mark_doc_type = model->arch == LLM_ARCH_BERT && vocab->n_token_types() > 1;
     if (rerank_prompt != nullptr) {
         std::string prompt = rerank_prompt;
         size_t pos = prompt.find("{document}");
@@ -1572,7 +1577,7 @@ server_tokens format_prompt_rerank(
         string_replace_all(doc_prompt, "{document}", doc  );
         auto query_tokens= tokenize_input_subprompt(vocab, mctx,query_prompt, false, true);
         auto doc_tokens= tokenize_input_subprompt(vocab, mctx,doc_prompt, false, true);
-        if (model->arch == LLM_ARCH_BERT){
+        if (mark_doc_type) {
             // token_id = token_id + token_type_ids*vocab_size
             for (int32_t i = 0; i < doc_tokens.size(); i++) {
                 doc_tokens.set_token(i,doc_tokens[i] + vocab_size);
@@ -1584,7 +1589,7 @@ server_tokens format_prompt_rerank(
         // Get EOS token - use SEP token as fallback if EOS is not available
         server_tokens query_tokens = tokenize_input_subprompt(vocab, mctx, query, false, false);
         server_tokens doc_tokens   = tokenize_input_subprompt(vocab, mctx, doc,   false, false);
-        if (model->arch == LLM_ARCH_BERT) {
+        if (mark_doc_type) {
             for (int32_t i = 0; i < doc_tokens.size(); i++) {
                 doc_tokens.set_token(i,doc_tokens[i] + vocab_size);
             }
@@ -1606,7 +1611,7 @@ server_tokens format_prompt_rerank(
         }
         result.push_back(doc_tokens);
         if (llama_vocab_get_add_eos(vocab)) {
-            result.push_back(model->arch == LLM_ARCH_BERT ? eos_token+ vocab_size : eos_token);
+            result.push_back(mark_doc_type ? eos_token+ vocab_size : eos_token);
         }
     }
 
