@@ -198,7 +198,8 @@ llama_model_bert::graph::graph(const llama_model & model, const llm_graph_params
             cb(cur, "ffn_out", il);
         } else if (model.arch == LLM_ARCH_JINA_BERT_V2) {
             const bool up_contains_gate = !model.layers[il].ffn_gate && model.layers[il].ffn_up->ne[1] != hparams.n_ff();
-            auto type_op = up_contains_gate ? LLM_FFN_GEGLU : LLM_FFN_GELU;
+            // HF JinaBertGLUMLP uses nn.GELU() (exact erf), not the tanh approximation
+            auto type_op = up_contains_gate ? LLM_FFN_GEGLU_ERF : LLM_FFN_GELU_ERF;
             cur = build_ffn(cur,
                     model.layers[il].ffn_up, model.layers[il].ffn_up_b, NULL,
                     model.layers[il].ffn_gate, NULL, NULL,

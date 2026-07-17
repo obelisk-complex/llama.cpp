@@ -359,6 +359,12 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                     "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)",
                 };
                 break;
+            case LLAMA_VOCAB_PRE_TYPE_JINA_V1_EN:
+                // HF tokenizers "Whitespace" pre-tokenizer: \w+|[^\w\s]+
+                regex_exprs = {
+                    "[\\p{L}\\p{N}]+|[^\\s\\p{L}\\p{N}]+",
+                };
+                break;
             case LLAMA_VOCAB_PRE_TYPE_GPT2:
             case LLAMA_VOCAB_PRE_TYPE_MPT:
             case LLAMA_VOCAB_PRE_TYPE_OLMO:
@@ -601,8 +607,20 @@ struct llm_tokenizer_bpe_session {
     }
 
     virtual void tokenize(const std::string & text, std::vector<llama_token> & output) {
+        // some models (e.g. jina-v1-en rerankers) pair an uncased vocab with a Lowercase
+        // normalizer in the HF tokenizer; without byte fallback, uppercase codepoints
+        // would otherwise be dropped entirely
+        std::string lowered;
+        if (vocab.get_normalizer_opts().lowercase) {
+            lowered.reserve(text.size());
+            for (const uint32_t cpt : unicode_cpts_from_utf8(text)) {
+                lowered += unicode_cpt_to_utf8(unicode_tolower(cpt));
+            }
+        }
+        const std::string & input = vocab.get_normalizer_opts().lowercase ? lowered : text;
+
         int final_prev_index = -1;
-        const auto word_collection = unicode_regex_split(text, tokenizer.regex_exprs, tokenizer.byte_encode);
+        const auto word_collection = unicode_regex_split(input, tokenizer.regex_exprs, tokenizer.byte_encode);
 
         symbols_final.clear();
         auto tok_pre = vocab.get_pre_type();
@@ -2117,6 +2135,7 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             add_space_prefix = false;
             escape_whitespaces = false;
             clean_spaces = true;
+            normalizer_opts.lowercase = false; // opt-in per pre-tokenizer or via GGUF metadata
             if (tokenizer_pre.empty()) {
                 LLAMA_LOG_WARN("%s: missing pre-tokenizer type, using: 'default'\n", __func__);
                 LLAMA_LOG_WARN("%s:                                             \n", __func__);
@@ -2196,7 +2215,13 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
                 escape_whitespaces = true;
                 clean_spaces = false;
             } else if (
-                    tokenizer_pre == "jina-v1-en" ||
+                    tokenizer_pre == "jina-v1-en") {
+                // uncased vocab; HF tokenizer normalizer is [NFC, Lowercase],
+                // pre-tokenizer is word-level "Whitespace" (not byte-level GPT2)
+                pre_type = LLAMA_VOCAB_PRE_TYPE_JINA_V1_EN;
+                add_sep = true;
+                normalizer_opts.lowercase = true;
+            } else if (
                     tokenizer_pre == "jina-v2-code" ||
                     tokenizer_pre == "roberta-bpe") {
                 pre_type = LLAMA_VOCAB_PRE_TYPE_GPT2;

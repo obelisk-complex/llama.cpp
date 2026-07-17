@@ -59,6 +59,8 @@ enum llm_ffn_op_type : int {
     LLM_FFN_GEGLU,
     LLM_FFN_REGLU,
     LLM_FFN_SWIGLU_OAI_MOE,
+    LLM_FFN_GELU_ERF,           // exact erf GELU (HF nn.GELU() default), e.g. jina-bert-v2
+    LLM_FFN_GEGLU_ERF,
 };
 
 enum llm_ffn_gate_type {

@@ -20,12 +20,32 @@ void llama_model_jina_bert_v2::load_arch_tensors(llama_model_loader & ml) {
     tok_norm   = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD_NORM, "weight", 0), {n_embd}, 0); // LayerNorm
     tok_norm_b = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD_NORM, "bias",   0), {n_embd}, 0); // LayerNorm bias
 
-    cls   = create_tensor(tn(LLM_TENSOR_CLS, "weight"), {n_embd, 1}, TENSOR_NOT_REQUIRED);
-    cls_b = create_tensor(tn(LLM_TENSOR_CLS, "bias"),   {1},         TENSOR_NOT_REQUIRED);
+    // classification head, two known layouts:
+    //  - pooler-style (jina-reranker-v1-*): cls {n_embd, n_embd} = pooler.dense (tanh applied
+    //    in build_pooling), then cls.output {n_embd, n_cls_out} = final classifier projection
+    //  - direct projection: cls {n_embd, 1}, no cls.output
+    const auto tn_cls_weight = tn(LLM_TENSOR_CLS, "weight");
+    ggml_tensor * t_cls = ml.get_tensor_meta(tn_cls_weight.str().c_str());
+
+    if (t_cls && t_cls->ne[1] == n_embd) {
+        cls   = create_tensor(tn_cls_weight,              {n_embd, n_embd}, TENSOR_NOT_REQUIRED);
+        cls_b = create_tensor(tn(LLM_TENSOR_CLS, "bias"), {n_embd},         TENSOR_NOT_REQUIRED);
+
+        cls_out   = create_tensor(tn(LLM_TENSOR_CLS_OUT, "weight"), {n_embd, hparams.n_cls_out}, TENSOR_NOT_REQUIRED);
+        cls_out_b = create_tensor(tn(LLM_TENSOR_CLS_OUT, "bias"),   {hparams.n_cls_out},         TENSOR_NOT_REQUIRED);
+    } else {
+        cls   = create_tensor(tn_cls_weight,              {n_embd, 1}, TENSOR_NOT_REQUIRED);
+        cls_b = create_tensor(tn(LLM_TENSOR_CLS, "bias"), {1},         TENSOR_NOT_REQUIRED);
+    }
     for (int i = 0; i < n_layer; ++i) {
         auto & layer = layers[i]; // JinaBertLayer
 
-        create_tensor_qkv(layer, i, n_embd, n_embd, n_embd_gqa, n_embd_gqa, 0);
+        // q size is n_embd_head_k * n_head (== n_embd for stock GGUFs); GGUFs converted with
+        // the alibi head-padding transform carry n_head = 16 with 32-wide heads, so that
+        // ggml's standard 16-head alibi slopes reproduce this model family's nonstandard
+        // halved-tail 12-head slopes ("quick fix on large jump at header=12" in the HF
+        // modeling_bert.py) via zero-padded, slope-permuted attention heads
+        create_tensor_qkv(layer, i, n_embd, n_embd_head_k * n_head, n_embd_gqa, n_embd_gqa, 0);
 
         layer.attn_q_norm   = create_tensor(tn(LLM_TENSOR_ATTN_Q_NORM, "weight", i), {n_embd}, TENSOR_NOT_REQUIRED);
         layer.attn_q_norm_b = create_tensor(tn(LLM_TENSOR_ATTN_Q_NORM, "bias",   i), {n_embd}, TENSOR_NOT_REQUIRED);
@@ -33,7 +53,7 @@ void llama_model_jina_bert_v2::load_arch_tensors(llama_model_loader & ml) {
         layer.attn_k_norm   = create_tensor(tn(LLM_TENSOR_ATTN_K_NORM, "weight", i), {n_embd}, TENSOR_NOT_REQUIRED);
         layer.attn_k_norm_b = create_tensor(tn(LLM_TENSOR_ATTN_K_NORM, "bias",   i), {n_embd}, TENSOR_NOT_REQUIRED);
 
-        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd}, 0); //output_dens
+        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd_head_k * n_head, n_embd}, 0); //output_dens
         layer.wo_b = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i), {n_embd}, 0); //output_dens
 
         layer.attn_out_norm   = create_tensor(tn(LLM_TENSOR_ATTN_OUT_NORM, "weight", i), {n_embd}, 0); //output_norm

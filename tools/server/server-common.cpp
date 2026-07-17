@@ -544,8 +544,8 @@ bool server_tokens::validate(const struct llama_context * ctx) const {
                 return false;
             }
         } else if (t < 0 || t >= n_vocab) {
-            // t = t + token_type_id*n_vocab , if arch == bert
-            return model->arch==LLM_ARCH_BERT;
+            // t = t + token_type_id*n_vocab , if arch == bert or jina-bert-v2
+            return model->arch==LLM_ARCH_BERT || model->arch==LLM_ARCH_JINA_BERT_V2;
         }
     }
     return true;
