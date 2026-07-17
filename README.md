@@ -7,6 +7,7 @@
 > - Upstream PR [ggml-org/llama.cpp#21729](https://github.com/ggml-org/llama.cpp/pull/21729) (squashed): adds `token_type_ids` input for rerank models with type-embedding.
 > - Upstream PR [ggml-org/llama.cpp#25448](https://github.com/ggml-org/llama.cpp/pull/25448) (cherry-picked): causal-LM reranker support via logit-margin scoring.
 > - Four local rerank-fidelity fixes for `jina-bert-v2` (jinaai/jina-reranker-v1-turbo-en and siblings).
+> - A fifth local fix for a crash on `bge-reranker-v2-m3` and other single-token-type BERT-arch rerankers, found while diagnosing what wikiq's own README called "order corruption" and turned out to be worse.
 >
 > **Why:** wikiq uses jina-reranker-v1-turbo-en as its rerank stage, the step that takes a first-pass
 > retrieval and puts the actually-relevant documents at the top before they're shown to a user or fed
@@ -52,8 +53,24 @@
 > order matches exactly on wikiq's conformance fixture, including a near-tied pair the pre-fix build
 > got wrong.
 >
-> See commit `afc212c` for the full technical writeup of the fixes above, and `9879b66` for an
-> unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path.
+> **A fifth, separate fix: `bge-reranker-v2-m3` crashed on every rerank request.** PR #21729's document
+> token-type marking assumes any `LLM_ARCH_BERT` model has a second token-type row; `bge-reranker-v2-m3`
+> (XLM-RoBERTa-based, `type_vocab_size = 1`) does not, so the marking indexed past the end of a
+> single-row embedding table: `GGML_ASSERT` abort on CPU, silent out-of-bounds reads on backends
+> without that check. This is the actual failure mode behind wikiq's own "order corruption on some
+> backends" description; a crash, not a subtler reordering. Fixed by gating the marking on
+> `vocab->n_token_types() > 1` (`tools/server/server-common.cpp`) so true two-segment BERT rerankers
+> keep #21729's original behaviour and single-type-vocab models match their own HF reference (which
+> also emits all-zero token-type ids for this architecture). A separate, smaller data issue remains in
+> the model's public GGUF conversion (missing `tokenizer.ggml.add_sep_token`, same class of bug as the
+> jina fixes above) - see
+> [`scripts/fix-bge-rerank-gguf.py`](https://github.com/obelisk-complex/wikiq/blob/master/scripts/fix-bge-rerank-gguf.py)
+> in the wikiq repo. `bge-reranker-v2-m3` is not wikiq's pinned reranker; this is a fork correctness fix
+> found along the way, not evidence wikiq uses this model.
+>
+> See commit `afc212c` for the full technical writeup of the jina-bert-v2 fixes, `9879b66` for an
+> unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path, and `39b2009a` for the
+> bge-reranker-v2-m3 crash fix.
 >
 > This is a private-purpose fork, not a source for upstream PRs: see [`AGENTS.md`](AGENTS.md) for why.
 
