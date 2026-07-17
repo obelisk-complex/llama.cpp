@@ -1,5 +1,21 @@
 # llama.cpp
 
+> [!NOTE]
+> **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-rerank-patches`) maintained for the
+> [wikiq](https://github.com/obelisk-complex/wikiq) project. Branched from release `b10046`, it carries:
+>
+> - Upstream PR [ggml-org/llama.cpp#21729](https://github.com/ggml-org/llama.cpp/pull/21729) (squashed) — adds `token_type_ids` input for rerank models with type-embedding.
+> - Upstream PR [ggml-org/llama.cpp#25448](https://github.com/ggml-org/llama.cpp/pull/25448) (cherry-picked) — causal-LM reranker support via logit-margin scoring.
+> - Four local rerank-fidelity fixes for `jina-bert-v2` (jinaai/jina-reranker-v1-turbo-en and siblings), found by diffing this fork's live rerank output against the real HF reference model — none of which had an existing upstream issue or fix as of this writing:
+>   1. **Classification head layout** — the official `ggml-org/jina-reranker-v1-turbo-en-GGUF` conversion omits the `pooler.dense` layer HF's forward pass actually uses before the classifier, collapsing scores into a narrow, wrongly-ordered band. Loader now supports both the single-tensor direct-projection layout and this pooler-style two-tensor layout (`src/models/jina-bert-v2.cpp`). The GGUF itself needs rebuilding to supply the missing tensors — see [`scripts/fix-rerank-gguf.py`](https://github.com/obelisk-complex/wikiq/blob/master/scripts/fix-rerank-gguf.py) in the wikiq repo.
+>   2. **Tokenizer** — `jina-v1-en` was sharing `GPT2`'s byte-level pre-tokenizer with unrelated tokenizer families, silently dropping every uppercase codepoint and mis-splitting mixed alphanumerics. New dedicated `LLAMA_VOCAB_PRE_TYPE_JINA_V1_EN` (`src/llama-vocab.{h,cpp}`) with the model's real word-level, lowercase-normalized tokenization.
+>   3. **ALiBi head slopes** — `jina-bert-v2`'s reference implementation halves the interpolated ALiBi slope for 4 of its 12 attention heads (a documented "quick fix" in its own `modeling_bert.py`); ggml's slope table has no way to express that. Loader now supports head-padding to 16 heads so the fixed GGUF (above) can permute real heads onto ggml's matching standard slopes.
+>   4. **GELU approximation** — HF's `JinaBertGLUMLP` uses the exact erf-form GELU, not the tanh approximation `build_ffn` had wired up for this arch. New `LLM_FFN_GELU_ERF`/`LLM_FFN_GEGLU_ERF` ops (`src/llama-graph.{h,cpp}`), used only by `LLM_ARCH_JINA_BERT_V2`.
+>
+> Combined, these bring this fork's live rerank scores for jina-reranker-v1-turbo-en within ±0.005 (raw logit) of the real HF reference, with exact rank-order agreement on wikiq's conformance fixture. See commit `afc212c` for the full technical writeup of the fixes above, and `9879b66` for an unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path.
+>
+> This is a private-purpose fork, not a source for upstream PRs — see [`AGENTS.md`](AGENTS.md) for why.
+
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
 <div align="center">
