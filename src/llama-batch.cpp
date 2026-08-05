@@ -48,8 +48,19 @@ bool llama_batch_allocr::init(
 
     int32_t vocab_size = vocab.n_tokens();
     if (batch.token) {
+        if (vocab_size == 0) {
+            LLAMA_LOG_ERROR("%s: token batch with an empty vocab\n", __func__);
+            return false;
+        }
+
         for (int32_t i = 0; i < batch.n_tokens; ++i) {
-            if (batch.token[i] < 0 || (uint32_t) batch.token[i] >= vocab_size) {
+            if (batch.token[i] < 0) {
+                LLAMA_LOG_ERROR("%s: invalid token[%d] = %d\n", __func__, i, batch.token[i]);
+                return false;
+            }
+
+            // ids at or above vocab_size carry a token_type in the high part, decoded below
+            if ((uint32_t) batch.token[i] >= vocab_size) {
                 LLAMA_LOG_WARN("%s: invalid token[%d] = %d\n", __func__, i, batch.token[i]);
                 break;
             }
@@ -70,11 +81,14 @@ bool llama_batch_allocr::init(
     //
     // auto-generate missing fields
     //
+    // embedding batches have no token ids to decode, and keep the default type 0
     token_type_ids.resize(batch.n_tokens);
-    for (int32_t i = 0; i < batch.n_tokens; ++i) {
-        int32_t token_type =  batch.token[i] / vocab_size;
-        batch.token[i] = batch.token[i] - token_type * vocab_size;
-        token_type_ids[i] = token_type;
+    if (batch.token) {
+        for (int32_t i = 0; i < batch.n_tokens; ++i) {
+            int32_t token_type =  batch.token[i] / vocab_size;
+            batch.token[i] = batch.token[i] - token_type * vocab_size;
+            token_type_ids[i] = token_type;
+        }
     }
 
     if (!batch.n_seq_id) {
