@@ -2,12 +2,15 @@
 
 > [!NOTE]
 > **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-rerank-patches`) maintained for the
-> [wikiq](https://github.com/obelisk-complex/wikiq) project. Branched from release `b10046`, it carries:
+> [wikiq](https://github.com/obelisk-complex/wikiq) project. Branched from release `b10046`, rebased
+> 2026-08-05 onto `b10288` (242 upstream commits of drift; one inert enum-slot renumber was the only
+> conflict). It carries:
 >
 > - Upstream PR [ggml-org/llama.cpp#21729](https://github.com/ggml-org/llama.cpp/pull/21729) (squashed): adds `token_type_ids` input for rerank models with type-embedding.
 > - Upstream PR [ggml-org/llama.cpp#25448](https://github.com/ggml-org/llama.cpp/pull/25448) (cherry-picked): causal-LM reranker support via logit-margin scoring.
 > - Four local rerank-fidelity fixes for `jina-bert-v2` (jinaai/jina-reranker-v1-turbo-en and siblings).
 > - A fifth local fix for a crash on `bge-reranker-v2-m3` and other single-token-type BERT-arch rerankers, found while diagnosing what wikiq's own README called "order corruption" and turned out to be worse.
+> - A sixth local fix: #21729's `token_type` decode divided by zero on an empty vocab and skipped the null-batch guard its sibling validation loop has, crashing (SIGFPE / SIGSEGV) rather than rejecting or defaulting cleanly. Found by the rebase's own test suite, not by rerank use - unrelated to the four fidelity fixes above.
 >
 > **Why:** wikiq uses jina-reranker-v1-turbo-en as its rerank stage, the step that takes a first-pass
 > retrieval and puts the actually-relevant documents at the top before they're shown to a user or fed
