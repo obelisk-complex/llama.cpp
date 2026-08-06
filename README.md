@@ -11,6 +11,8 @@
 > - Four local rerank-fidelity fixes for `jina-bert-v2` (jinaai/jina-reranker-v1-turbo-en and siblings).
 > - A fifth local fix for a crash on `bge-reranker-v2-m3` and other single-token-type BERT-arch rerankers, found while diagnosing what wikiq's own README called "order corruption" and turned out to be worse.
 > - A sixth local fix: #21729's `token_type` decode divided by zero on an empty vocab and skipped the null-batch guard its sibling validation loop has, crashing (SIGFPE / SIGSEGV) rather than rejecting or defaulting cleanly. Found by the rebase's own test suite, not by rerank use - unrelated to the four fidelity fixes above.
+> - A DeBERTa-v3 port (`LLM_ARCH_DEBERTA`): disentangled attention, the DeBERTa `ContextPooler`
+>   classification head, and a `conversion/deberta.py` converter. See below.
 >
 > **Why:** wikiq uses jina-reranker-v1-turbo-en as its rerank stage, the step that takes a first-pass
 > retrieval and puts the actually-relevant documents at the top before they're shown to a user or fed
@@ -71,11 +73,85 @@
 > in the wikiq repo. `bge-reranker-v2-m3` is not wikiq's pinned reranker; this is a fork correctness fix
 > found along the way, not evidence wikiq uses this model.
 >
-> See commit `afc212c` for the full technical writeup of the jina-bert-v2 fixes, `9879b66` for an
-> unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path, and `39b2009a` for the
+> **DeBERTa-v3 support (`LLM_ARCH_DEBERTA`).** This is the reason to pin the fork rather than build
+> upstream: stock llama.cpp has no DeBERTa architecture, and a DeBERTa checkpoint stops at
+> `Model DebertaV2ForSequenceClassification is not supported`. The fork adds the architecture, its
+> position-bucket GGUF metadata keys and relative-embedding tensors, DeBERTa's own log-bucket
+> relative-position arithmetic (`make_log_bucket_position`, `ceil`-based and signed, distinct from
+> T5's `floor`-based bucketing and not interchangeable with it), a `conversion/deberta.py` converter
+> class, the encoder graph with the three-term disentangled attention (content-to-content,
+> content-to-position, position-to-content) composed from existing ggml ops rather than a new one,
+> and the DeBERTa `ContextPooler` GELU branch in `build_pooling` so the classification head matches
+> HF instead of applying `tanh`.
+>
+> **What it supports, and what it refuses.** Sequence classifiers only: the converter registers
+> `DebertaV2ForSequenceClassification` and nothing else. That excludes more than it sounds like,
+> because `microsoft/deberta-v3-{xsmall,small,base,large}` and `mdeberta-v3-base` ship a
+> `config.json` with no `architectures` key at all. They are base encoders with no classification
+> head to pool, they are not supported in v1, and converting one fails with the generic
+> `Failed to detect model architecture`, which names neither DeBERTa nor this fork. Point the
+> converter at a fine-tuned sequence classifier instead; `cross-encoder/nli-deberta-v3-base` is
+> the checkpoint this port is proven against. Also refused, each named at conversion time rather
+> than left to surface later as an unmappable tensor: `conv_kernel_size > 0`, the DeBERTa-v2
+> encoder ConvLayer, which this port implements nowhere (every released DeBERTa-v2 checkpoint sets
+> it and no v3 checkpoint does, which is why v3 is the supported line); `position_biased_input:
+> true`; `relative_attention: false`; `share_att_key: false`, since the graph projects the
+> relative embeddings through each layer's own `Wq`/`Wk`; any `norm_rel_ebd` other than
+> `layer_norm`; any `type_vocab_size` other than 0, so no segment embeddings; any `pos_att_type`
+> other than p2c plus c2p; and any `pooler_hidden_act` other than `gelu`. CPU-only and f32 in v1:
+> no quantised path and no Vulkan or ROCm shader work.
+>
+> **Converting and serving.**
+> ```console
+> python3 convert_hf_to_gguf.py /path/to/nli-deberta-v3-base --outtype f32 \
+>     --outfile /path/to/nli-deberta-v3-base-F32.gguf
+> llama-server --embeddings --pooling rank -m /path/to/nli-deberta-v3-base-F32.gguf
+> ```
+> Score through `/v1/embeddings`, and **set `"embd_normalize": -1` in the request body**. The server
+> euclidean-normalises any pooled output by default (`tools/server/server-task.h`), which rescales
+> the classifier logits into a unit vector: no error, no warning, just plausible numbers that are
+> not the model's. `llama-embedding` has the same default and the same remedy,
+> `--embd-normalize -1`. Under `--pooling rank` the response carries exactly `n_cls_out` values,
+> three for a 3-way NLI head.
+>
+> **Tests.** Eight `test-deberta-*` ctest targets cover the architecture registration, the bucket
+> arithmetic, the index invariant, the c2p and p2c bias terms, the conversion round-trip, the
+> encoder, and the classification head:
+> ```console
+> cmake -B build -DLLAMA_BUILD_TESTS=ON -DLLAMA_BUILD_EXAMPLES=ON
+> cmake --build build -j"$(nproc)"
+> ctest --test-dir build -R '^test-deberta' --no-tests=error --output-on-failure
+> ```
+> That must report 8 tests; fewer means cmake found no Python interpreter with the converter's
+> requirements and three of the eight were never registered. Those three convert a checkpoint, so
+> they need `requirements/requirements-convert_hf_to_gguf.txt` installed in the interpreter cmake
+> resolved at configure time.
+>
+> Stock llama.cpp has nothing to compare against here: the same checkpoint stops at
+> `Model DebertaV2ForSequenceClassification is not supported` before a GGUF exists. The
+> before-and-after worth running is the rerank one below, where both builds produce numbers.
+>
+> **A separate fix, not DeBERTa-specific: RANK-pooled embedding reads over-ran the heap.** Under
+> `--pooling rank`, `llama_context` sizes each sequence's embedding buffer at `n_cls_out` floats
+> (`src/llama-context.cpp`), but `llama-embedding` and `llama-server` both read `n_embd_out` of
+> them: on a 3-class model that is 3072 bytes read out of a 12-byte allocation. The tail was not
+> padding. `common_embd_normalize` writes every output it is given, so the zero-init of the
+> response vector was overwritten with out-of-bounds reads and then serialised into the HTTP
+> response; under the default euclidean norm the divisor summed over those reads as well, so the
+> real logits were corrupted too, not just the values after them. Both call sites now clamp the
+> read to `n_cls_out`, and `/v1/embeddings` on a RANK-pooled model returns that many values and
+> nothing after them. This bug is upstream's, present at `b10288`, and it reaches any RANK-pooled
+> model on any architecture; it is carried as its own commit for that reason. `/v1/rerank` is
+> served by `send_rerank`, which reads `embd[0]` alone, and is unaffected.
+>
+> See commit `d191d0f` for the full technical writeup of the jina-bert-v2 fixes, `f7127b2` for an
+> unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path, and `9c51923` for the
 > bge-reranker-v2-m3 crash fix.
 >
-> This is a private-purpose fork, not a source for upstream PRs: see [`AGENTS.md`](AGENTS.md) for why.
+> This fork is publicly available so it can be pinned as a dependency. It is maintained for wikiq's
+> use rather than as a source of upstream PRs: the work here is AI-assisted well beyond what
+> [`AGENTS.md`](AGENTS.md) accepts in a contribution, and none of it is offered for upstream to
+> maintain.
 
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
