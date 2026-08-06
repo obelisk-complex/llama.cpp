@@ -960,6 +960,12 @@ class GGUFWriter:
     def add_relative_attn_buckets_count(self, value: int) -> None:
         self.add_uint32(Keys.Attention.REL_BUCKETS_COUNT.format(arch=self.arch), value)
 
+    def add_position_buckets(self, value: int) -> None:
+        self.add_uint32(Keys.Attention.POSITION_BUCKETS.format(arch=self.arch), value)
+
+    def add_max_relative_positions(self, value: int) -> None:
+        self.add_uint32(Keys.Attention.MAX_RELATIVE_POSITIONS.format(arch=self.arch), value)
+
     def add_sliding_window(self, value: int) -> None:
         self.add_uint32(Keys.Attention.SLIDING_WINDOW.format(arch=self.arch), value)
 

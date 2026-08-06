@@ -183,6 +183,8 @@ class Keys:
         VALUE_RESIDUAL_MIX_LORA_RANK = "{arch}.attention.value_residual_mix_lora_rank"
         GATE_LORA_RANK               = "{arch}.attention.gate_lora_rank"
         REL_BUCKETS_COUNT            = "{arch}.attention.relative_buckets_count"
+        POSITION_BUCKETS             = "{arch}.attention.position_buckets"
+        MAX_RELATIVE_POSITIONS       = "{arch}.attention.max_relative_positions"
         SLIDING_WINDOW               = "{arch}.attention.sliding_window"
         SCALE                        = "{arch}.attention.scale"
         OUTPUT_GROUP_COUNT           = "{arch}.attention.output_group_count"
@@ -448,6 +450,7 @@ class MODEL_ARCH(IntEnum):
     STARCODER        = auto()
     REFACT           = auto()
     BERT             = auto()
+    DEBERTA          = auto()
     MODERN_BERT      = auto()
     NOMIC_BERT       = auto()
     NOMIC_BERT_MOE   = auto()
@@ -595,6 +598,8 @@ class MODEL_TENSOR(IntEnum):
     MASKED_EMBD_ORDERING = auto()
     TOKEN_TYPES          = auto()
     POS_EMBD             = auto()
+    REL_EMBD             = auto() # deberta shared relative-position embeddings
+    REL_EMBD_NORM        = auto() # deberta
     OUTPUT               = auto()
     DENSE_2_OUT          = auto() # embeddinggemma 2_Dense
     DENSE_3_OUT          = auto() # embeddinggemma 3_Dense
@@ -1119,6 +1124,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.STARCODER:        "starcoder",
     MODEL_ARCH.REFACT:           "refact",
     MODEL_ARCH.BERT:             "bert",
+    MODEL_ARCH.DEBERTA:          "deberta",
     MODEL_ARCH.MODERN_BERT:      "modern-bert",
     MODEL_ARCH.NOMIC_BERT:       "nomic-bert",
     MODEL_ARCH.NOMIC_BERT_MOE:   "nomic-bert-moe",
@@ -1265,6 +1271,8 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.MASKED_EMBD_CENTROIDS:     "masked_embd_centroids",
     MODEL_TENSOR.MASKED_EMBD_ORDERING:      "masked_embd_ordering",
     MODEL_TENSOR.POS_EMBD:                  "position_embd",
+    MODEL_TENSOR.REL_EMBD:                  "rel_embd",
+    MODEL_TENSOR.REL_EMBD_NORM:             "rel_embd_norm",
     MODEL_TENSOR.OUTPUT_NORM:               "output_norm",
     MODEL_TENSOR.OUTPUT:                    "output",
     MODEL_TENSOR.DENSE_2_OUT:               "dense_2", # embeddinggemma 2_Dense
@@ -2190,6 +2198,22 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.ATTN_OUT,
         MODEL_TENSOR.FFN_DOWN,
         MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.LAYER_OUT_NORM,
+        MODEL_TENSOR.CLS,
+        MODEL_TENSOR.CLS_OUT,
+    ],
+    MODEL_ARCH.DEBERTA: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.TOKEN_EMBD_NORM,
+        MODEL_TENSOR.REL_EMBD,
+        MODEL_TENSOR.REL_EMBD_NORM,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.ATTN_OUT_NORM,
+        MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.FFN_DOWN,
         MODEL_TENSOR.LAYER_OUT_NORM,
         MODEL_TENSOR.CLS,
         MODEL_TENSOR.CLS_OUT,

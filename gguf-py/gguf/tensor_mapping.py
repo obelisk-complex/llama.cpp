@@ -17,6 +17,7 @@ class TensorNameMap:
             "embed_tokens",                              # embeddinggemma
             "tok_embeddings",                            # llama-pth
             "embeddings.word_embeddings",                # bert nomic-bert
+            "deberta.embeddings.word_embeddings",        # deberta
             "embeddings.tok_embeddings",                 # modern-bert
             "wte",                                       # gpt2
             "transformer.embd.wte",                      # phi2
@@ -54,6 +55,7 @@ class TensorNameMap:
         MODEL_TENSOR.TOKEN_EMBD_NORM: (
             "word_embeddings_layernorm",  # bloom
             "embeddings.LayerNorm",       # bert
+            "deberta.embeddings.LayerNorm", # deberta
             "embeddings.norm",            # modern-bert
             "emb_ln",                     # nomic-bert
             "transformer.norm",           # openelm
@@ -71,6 +73,14 @@ class TensorNameMap:
             "embeddings.position_embeddings",  # bert
             "wpe",                             # gpt2
             "model.embed_positions",           # rugpt3xl
+        ),
+
+        # Shared relative-position embeddings
+        MODEL_TENSOR.REL_EMBD: (
+            "deberta.encoder.rel_embeddings", # deberta
+        ),
+        MODEL_TENSOR.REL_EMBD_NORM: (
+            "deberta.encoder.LayerNorm", # deberta
         ),
 
         # Output
@@ -258,6 +268,7 @@ class TensorNameMap:
             "model.layers.{bid}.self_attn.q_proj_no_perm",               # llama-custom
             "layers.{bid}.attention.wq",                                 # llama-pth
             "encoder.layer.{bid}.attention.self.query",                  # bert
+            "deberta.encoder.layer.{bid}.attention.self.query_proj",     # deberta
             "transformer.layer.{bid}.attention.q_lin",                   # distillbert
             "transformer.h.{bid}.attn.q_proj",                           # gpt-j
             "model.layers.layers.{bid}.self_attn.q_proj",                # plamo
@@ -278,6 +289,7 @@ class TensorNameMap:
             "model.layers.{bid}.self_attn.k_proj_no_perm",             # llama-custom
             "layers.{bid}.attention.wk",                               # llama-pth
             "encoder.layer.{bid}.attention.self.key",                  # bert
+            "deberta.encoder.layer.{bid}.attention.self.key_proj",     # deberta
             "transformer.layer.{bid}.attention.k_lin",                 # distillbert
             "transformer.h.{bid}.attn.k_proj",                         # gpt-j
             "transformer.h.{bid}.attn.k",                              # refact
@@ -298,6 +310,7 @@ class TensorNameMap:
             "layers.{bid}.self_attn.v_proj",                             # embeddinggemma
             "layers.{bid}.attention.wv",                                 # llama-pth
             "encoder.layer.{bid}.attention.self.value",                  # bert
+            "deberta.encoder.layer.{bid}.attention.self.value_proj",     # deberta
             "transformer.layer.{bid}.attention.v_lin",                   # distillbert
             "transformer.h.{bid}.attn.v_proj",                           # gpt-j
             "transformer.h.{bid}.attn.v",                                # refact
@@ -325,6 +338,7 @@ class TensorNameMap:
             "model.layers.{bid}.self_attn.linear_attn",                     # deci
             "layers.{bid}.attention.wo",                                    # llama-pth
             "encoder.layer.{bid}.attention.output.dense",                   # bert
+            "deberta.encoder.layer.{bid}.attention.output.dense",           # deberta
             "layers.{bid}.attn.Wo",                                         # modern-bert
             "transformer.layer.{bid}.attention.out_lin",                    # distillbert
             "transformer.h.{bid}.attn.out_proj",                            # gpt-j
@@ -354,6 +368,7 @@ class TensorNameMap:
         # Attention output norm
         MODEL_TENSOR.ATTN_OUT_NORM: (
             "encoder.layer.{bid}.attention.output.LayerNorm",  # bert
+            "deberta.encoder.layer.{bid}.attention.output.LayerNorm", # deberta
             "transformer.layer.{bid}.sa_layer_norm",           # distillbert
             "encoder.layers.{bid}.norm1",                      # nomic-bert
             "transformer.decoder_layer.{bid}.rms_norm_1",      # Grok
@@ -493,6 +508,7 @@ class TensorNameMap:
             "layers.{bid}.mlp.up_proj",                               # embeddinggemma
             "layers.{bid}.feed_forward.w3",                           # llama-pth
             "encoder.layer.{bid}.intermediate.dense",                 # bert
+            "deberta.encoder.layer.{bid}.intermediate.dense",         # deberta
             "layers.{bid}.mlp.Wi",                                    # modern-bert
             "transformer.layer.{bid}.ffn.lin1",                       # distillbert
             "transformer.h.{bid}.mlp.fc_in",                          # gpt-j
@@ -628,6 +644,7 @@ class TensorNameMap:
             "layers.{bid}.mlp.down_proj",                             # embeddinggemma
             "layers.{bid}.feed_forward.w2",                           # llama-pth
             "encoder.layer.{bid}.output.dense",                       # bert
+            "deberta.encoder.layer.{bid}.output.dense",               # deberta
             "layers.{bid}.mlp.Wo",                                    # modern-bert
             "transformer.layer.{bid}.ffn.lin2",                       # distillbert
             "transformer.h.{bid}.mlp.fc_out",                         # gpt-j
@@ -724,6 +741,7 @@ class TensorNameMap:
 
         MODEL_TENSOR.LAYER_OUT_NORM: (
             "encoder.layer.{bid}.output.LayerNorm",         # bert
+            "deberta.encoder.layer.{bid}.output.LayerNorm", # deberta
             "transformer.layer.{bid}.output_layer_norm",    # distillbert
             "encoder.layers.{bid}.norm2",                   # nomic-bert
             "transformer.decoder_layer.{bid}.rms_norm_3",   # Grok

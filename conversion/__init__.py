@@ -46,6 +46,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
     "Cohere2ForCausalLM": "command_r",
     "CohereForCausalLM": "command_r",
     "DbrxForCausalLM": "dbrx",
+    "DebertaV2ForSequenceClassification": "deberta",
     "DeciLMForCausalLM": "deci",
     "DeepseekForCausalLM": "deepseek",
     "DeepseekOCRForCausalLM": "deepseek",

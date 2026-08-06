@@ -341,3 +341,16 @@ if (TARGET gguf-model-data)
     target_link_libraries(test-export-graph-ops PRIVATE gguf-model-data)
     target_compile_definitions(test-export-graph-ops PRIVATE LLAMA_HF_FETCH)
 endif()
+
+# DeBERTa port tests that are not C++ binaries. Registered so they keep running
+# after the task that wrote them, rather than only by hand.
+find_package(Python3 COMPONENTS Interpreter)
+if (Python3_FOUND)
+    llama_test_cmd(
+        ${Python3_EXECUTABLE}
+        NAME test-deberta-convert
+        LABEL python
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        ARGS ${CMAKE_CURRENT_SOURCE_DIR}/test-deberta-convert.py
+    )
+endif()
