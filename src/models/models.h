@@ -290,6 +290,22 @@ struct llama_model_bert : public llama_model_base {
 };
 
 
+struct llama_model_deberta : public llama_model_base {
+    llama_model_deberta(const struct llama_model_params & params) : llama_model_base(params) {}
+    void load_arch_hparams(llama_model_loader & ml) override;
+    void load_arch_tensors(llama_model_loader & ml) override;
+
+    struct graph : public llm_graph_context {
+        graph(const llama_model & model, const llm_graph_params & params);
+        ggml_tensor * rel = nullptr; // shared rel embeddings, LayerNorm'd once
+        void pos_projections(const llama_model & model, int il, int64_t n_embd_head,
+                             ggml_tensor ** pos_key, ggml_tensor ** pos_query);
+    };
+
+    std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
+};
+
+
 struct llama_model_jina_bert_v2 : public llama_model_base {
     llama_model_jina_bert_v2(const struct llama_model_params & params) : llama_model_base(params) {}
     void load_arch_hparams(llama_model_loader & ml) override;

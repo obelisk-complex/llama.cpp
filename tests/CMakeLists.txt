@@ -354,3 +354,15 @@ if (Python3_FOUND)
         ARGS ${CMAKE_CURRENT_SOURCE_DIR}/test-deberta-convert.py
     )
 endif()
+
+if (NOT WIN32 AND Python3_FOUND AND LLAMA_BUILD_EXAMPLES)
+    llama_test_cmd(
+        ${CMAKE_COMMAND}
+        NAME test-deberta-encode
+        LABEL python
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        ARGS -E env LLAMA_EMBEDDING_BIN=$<TARGET_FILE:llama-embedding>
+             LLAMA_PYTHON=${Python3_EXECUTABLE}
+             bash ${CMAKE_CURRENT_SOURCE_DIR}/test-deberta-encode.sh
+    )
+endif()

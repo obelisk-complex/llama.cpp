@@ -64,6 +64,8 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
             return new llama_model_refact(params);
         case LLM_ARCH_BERT:
             return new llama_model_bert(params);
+        case LLM_ARCH_DEBERTA:
+            return new llama_model_deberta(params);
         case LLM_ARCH_JINA_BERT_V2:
             return new llama_model_jina_bert_v2(params);
         case LLM_ARCH_JINA_BERT_V3:
@@ -2058,6 +2060,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
         // Models that need specific instantiation should be handled in the
         // switch statement
         case LLM_ARCH_BERT:
+        case LLM_ARCH_DEBERTA:
         case LLM_ARCH_JINA_BERT_V2:
         case LLM_ARCH_JINA_BERT_V3:
         case LLM_ARCH_NOMIC_BERT:
@@ -2622,6 +2625,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_GROK:
         case LLM_ARCH_DBRX:
         case LLM_ARCH_BERT:
+        case LLM_ARCH_DEBERTA:
         case LLM_ARCH_JINA_BERT_V3:
         case LLM_ARCH_MODERN_BERT:
         case LLM_ARCH_NOMIC_BERT:
