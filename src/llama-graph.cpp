@@ -3663,6 +3663,8 @@ void llm_graph_context::build_pooling(
                     }
                     if (arch == LLM_ARCH_MODERN_BERT) {
                         cur = ggml_gelu(ctx0, cur);
+                    } else if (arch == LLM_ARCH_DEBERTA) {
+                        cur = ggml_gelu_erf(ctx0, cur); // DeBERTa ContextPooler uses (erf) gelu, not tanh
                     } else {
                         cur = ggml_tanh(ctx0, cur);
                     }
