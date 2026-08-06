@@ -3786,3 +3786,22 @@ int32_t llama_relative_position_bucket(llama_pos x, llama_pos y, uint64_t n_buck
 
     return relative_bucket;
 }
+
+int32_t deberta_relative_position_bucket(int32_t relative_pos, int32_t bucket_size, int32_t max_position) {
+    const int32_t sign = (relative_pos > 0) - (relative_pos < 0);
+    const int32_t mid  = bucket_size / 2;
+
+    int32_t abs_pos;
+    if (relative_pos > -mid && relative_pos < mid) {
+        abs_pos = mid - 1;
+    } else {
+        abs_pos = std::abs(relative_pos);
+    }
+    if (abs_pos <= mid) {
+        return relative_pos; // exact, signed
+    }
+    const int32_t log_pos = (int32_t) std::ceil(
+        std::log((double) abs_pos / mid) /
+        std::log((double) (max_position - 1) / mid) * (mid - 1)) + mid;
+    return log_pos * sign;
+}

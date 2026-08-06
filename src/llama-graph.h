@@ -1352,3 +1352,7 @@ struct llm_graph_context {
 
 // TODO: better name
 int32_t llama_relative_position_bucket(llama_pos x, llama_pos y, uint64_t n_buckets, bool bidirectional);
+
+// DeBERTa-v2/v3 make_log_bucket_position: signed, ceil-based log bucketing.
+// NOT interchangeable with llama_relative_position_bucket (T5, floor-based).
+int32_t deberta_relative_position_bucket(int32_t relative_pos, int32_t bucket_size, int32_t max_position);
