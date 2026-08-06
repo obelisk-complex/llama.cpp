@@ -51,6 +51,20 @@ std::unique_ptr<llm_graph_context> llama_model_deberta::build_arch_graph(const l
     return std::make_unique<graph>(*this, params);
 }
 
+void llama_model_deberta::graph::pos_projections(const llama_model & model, int il, int64_t n_embd_head,
+                                                 ggml_tensor ** pos_key, ggml_tensor ** pos_query) {
+    const int64_t n_rel_rows = model.rel_embd->ne[1]; // 2*att_span
+    // share_att_key: project rel through this layer's content Wk / Wq, biases included.
+    ggml_tensor * pk = build_lora_mm(model.layers[il].wk, rel);
+    if (model.layers[il].wk_b) pk = ggml_add(ctx0, pk, model.layers[il].wk_b);
+    ggml_tensor * pq = build_lora_mm(model.layers[il].wq, rel);
+    if (model.layers[il].wq_b) pq = ggml_add(ctx0, pq, model.layers[il].wq_b);
+    pk = ggml_reshape_3d(ctx0, pk, n_embd_head, n_head, n_rel_rows);       // [d, H, 2S]
+    pq = ggml_reshape_3d(ctx0, pq, n_embd_head, n_head, n_rel_rows);
+    *pos_key   = ggml_cont(ctx0, ggml_permute(ctx0, pk, 0, 2, 1, 3));      // [d, 2S, H]
+    *pos_query = ggml_cont(ctx0, ggml_permute(ctx0, pq, 0, 2, 1, 3));
+}
+
 llama_model_deberta::graph::graph(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
     GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
@@ -67,6 +81,11 @@ llama_model_deberta::graph::graph(const llama_model & model, const llm_graph_par
     auto * inp_attn = build_attn_inp_no_cache();
     ggml_tensor * inp_out_ids = build_inp_out_ids();
 
+    // norm_rel_ebd == "layer_norm": once, shared across layers.
+    rel = build_norm(model.rel_embd, model.rel_embd_norm, model.rel_embd_norm_b, LLM_NORM, -1);
+    cb(rel, "rel_embd_norm", -1);
+    auto * inp_pos = build_inp_deberta_pos();
+
     // Declared outside the loop because it is read again after it (`cur = inpL`
     // below), exactly as src/models/bert.cpp:85 declares its own.
     ggml_tensor * cur;
@@ -77,10 +96,21 @@ llama_model_deberta::graph::graph(const llama_model & model, const llm_graph_par
             auto [Qcur, Kcur, Vcur] = build_qkv(model.layers[il], cur, n_embd_head, n_head, n_head_kv, il);
             cb(Qcur, "Qcur", il); cb(Kcur, "Kcur", il); cb(Vcur, "Vcur", il);
 
-            // content-only baseline; Task 10 replaces nullptr with the disentangled kq_b.
+            // per-head content Q, K as [d, n_tokens, H]
+            ggml_tensor * Qh = ggml_cont(ctx0, ggml_permute(ctx0, Qcur, 0, 2, 1, 3));
+            ggml_tensor * Kh = ggml_cont(ctx0, ggml_permute(ctx0, Kcur, 0, 2, 1, 3));
+
+            ggml_tensor * pos_key = nullptr, * pos_query = nullptr;
+            pos_projections(model, il, n_embd_head, &pos_key, &pos_query);
+
+            ggml_tensor * kq_b = ggml_add(ctx0,
+                    deberta_c2p_bias(ctx0, pos_key,   Qh, inp_pos->c2p_index),
+                    deberta_p2c_bias(ctx0, pos_query, Kh, inp_pos->p2c_index)); // [n_kv, n_q, H], unscaled
+            cb(kq_b, "disentangled_bias", il);
+
             cur = build_attn(inp_attn,
                     model.layers[il].wo, model.layers[il].wo_b, nullptr,
-                    Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, kq_scale, il);
+                    Qcur, Kcur, Vcur, kq_b, nullptr, nullptr, kq_scale, il);
             cb(cur, "kqv_out", il);
         }
         if (il == n_layer - 1 && inp_out_ids) {
