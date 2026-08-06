@@ -205,6 +205,22 @@ void llm_graph_input_pos_bucket_kv::set_input(const llama_ubatch * ubatch) {
     }
 }
 
+void llm_graph_input_deberta_pos::set_input(const llama_ubatch * ubatch) {
+    if (!c2p_index) return;
+    const int64_t n_tokens = ubatch->n_tokens;
+    const int64_t n_head   = hparams.n_head();
+    GGML_ASSERT(ggml_backend_buffer_is_host(c2p_index->buffer));
+    GGML_ASSERT(ggml_backend_buffer_is_host(p2c_index->buffer));
+    // Same guard the T5 pos_bucket input carries (llama-graph.cpp:190), for the
+    // same reason: both fills index ubatch->pos[] linearly over n_tokens, which
+    // is only the right addressing when the ubatch is not seq-equal.
+    GGML_ASSERT(!ubatch->equal_seqs()); // TODO: use ubatch->n_seqs instead of failing
+    deberta_fill_c2p_index((int32_t *) c2p_index->data, ubatch->pos, n_tokens, n_head,
+                           (int32_t) hparams.position_buckets, (int32_t) hparams.max_relative_positions);
+    deberta_fill_p2c_index((int32_t *) p2c_index->data, ubatch->pos, n_tokens, n_head,
+                           (int32_t) hparams.position_buckets, (int32_t) hparams.max_relative_positions);
+}
+
 void llm_graph_input_out_ids::set_input(const llama_ubatch * ubatch) {
     GGML_ASSERT(out_ids);
 
@@ -2530,6 +2546,18 @@ ggml_tensor * llm_graph_context::build_pos_bias(ggml_tensor * pos_bucket, ggml_t
     return pos_bias;
 }
 
+llm_graph_input_deberta_pos * llm_graph_context::build_inp_deberta_pos() const {
+    auto inp = std::make_unique<llm_graph_input_deberta_pos>(hparams);
+    const int64_t n_head = hparams.n_head();
+    inp->c2p_index = ggml_new_tensor_3d(ctx0, GGML_TYPE_I32, n_tokens, n_tokens, n_head);
+    inp->p2c_index = ggml_new_tensor_3d(ctx0, GGML_TYPE_I32, n_tokens, n_tokens, n_head);
+    ggml_set_input(inp->c2p_index);
+    ggml_set_input(inp->p2c_index);
+    auto * ptr = inp.get();
+    res->add_input(std::move(inp));
+    return ptr;
+}
+
 ggml_tensor * llm_graph_context::build_attn_mha(
          ggml_tensor * q,
          ggml_tensor * k,
@@ -3804,4 +3832,37 @@ int32_t deberta_relative_position_bucket(int32_t relative_pos, int32_t bucket_si
         std::log((double) abs_pos / mid) /
         std::log((double) (max_position - 1) / mid) * (mid - 1)) + mid;
     return log_pos * sign;
+}
+
+void deberta_fill_c2p_index(int32_t * dst, const llama_pos * pos, int64_t n_tokens,
+                            int64_t n_head, int32_t position_buckets, int32_t max_position) {
+    const int32_t span = position_buckets;
+    for (int64_t q = 0; q < n_tokens; ++q) {
+        for (int64_t k = 0; k < n_tokens; ++k) {
+            const int32_t b = deberta_relative_position_bucket(pos[q] - pos[k], position_buckets, max_position);
+            int32_t c = b + span;
+            if (c < 0) c = 0; if (c > 2*span - 1) c = 2*span - 1;
+            dst[k + q * n_tokens] = c; // ne0 = key, ne1 = query
+        }
+    }
+    for (int64_t h = 1; h < n_head; ++h)
+        std::memcpy(dst + h*n_tokens*n_tokens, dst, n_tokens*n_tokens*sizeof(int32_t));
+}
+
+void deberta_fill_p2c_index(int32_t * dst, const llama_pos * pos, int64_t n_tokens,
+                            int64_t n_head, int32_t position_buckets, int32_t max_position) {
+    const int32_t span = position_buckets;
+    for (int64_t k = 0; k < n_tokens; ++k) {
+        for (int64_t q = 0; q < n_tokens; ++q) {
+            // Same value as c2p for this (q,k): +b, not -b. HF's source negates
+            // here but transposes afterwards, which cancels it. See the design
+            // section; this was settled by an A/B against HF, not by reading it.
+            const int32_t b = deberta_relative_position_bucket(pos[q] - pos[k], position_buckets, max_position);
+            int32_t p = b + span;
+            if (p < 0) p = 0; if (p > 2*span - 1) p = 2*span - 1;
+            dst[q + k * n_tokens] = p; // ne0 = query, ne1 = key (transposed vs c2p)
+        }
+    }
+    for (int64_t h = 1; h < n_head; ++h)
+        std::memcpy(dst + h*n_tokens*n_tokens, dst, n_tokens*n_tokens*sizeof(int32_t));
 }

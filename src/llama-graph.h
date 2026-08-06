@@ -225,6 +225,19 @@ public:
     const llama_kv_cache_context * mctx;
 };
 
+class llm_graph_input_deberta_pos : public llm_graph_input_i {
+public:
+    llm_graph_input_deberta_pos(const llama_hparams & hparams) : hparams(hparams) {}
+    virtual ~llm_graph_input_deberta_pos() = default;
+
+    void set_input(const llama_ubatch * ubatch) override;
+
+    ggml_tensor * c2p_index = nullptr; // [n_tokens, n_tokens, n_head] I32
+    ggml_tensor * p2c_index = nullptr;
+
+    const llama_hparams & hparams;
+};
+
 class llm_graph_input_out_ids : public llm_graph_input_i {
 public:
     llm_graph_input_out_ids(
@@ -1140,6 +1153,8 @@ struct llm_graph_context {
     ggml_tensor * build_inp_pos_bucket_dec() const;
     ggml_tensor * build_pos_bias(ggml_tensor * pos_bucket, ggml_tensor * attn_rel_b) const;
 
+    llm_graph_input_deberta_pos * build_inp_deberta_pos() const;
+
     //
     // attention
     //
@@ -1356,3 +1371,8 @@ int32_t llama_relative_position_bucket(llama_pos x, llama_pos y, uint64_t n_buck
 // DeBERTa-v2/v3 make_log_bucket_position: signed, ceil-based log bucketing.
 // NOT interchangeable with llama_relative_position_bucket (T5, floor-based).
 int32_t deberta_relative_position_bucket(int32_t relative_pos, int32_t bucket_size, int32_t max_position);
+
+void deberta_fill_c2p_index(int32_t * dst, const llama_pos * pos, int64_t n_tokens,
+                            int64_t n_head, int32_t position_buckets, int32_t max_position);
+void deberta_fill_p2c_index(int32_t * dst, const llama_pos * pos, int64_t n_tokens,
+                            int64_t n_head, int32_t position_buckets, int32_t max_position);
