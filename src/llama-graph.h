@@ -1381,3 +1381,11 @@ void deberta_fill_p2c_index(int32_t * dst, const llama_pos * pos, int64_t n_toke
 // Qh [d, n_q, n_head], c2p_index [n_kv, n_q, n_head] I32 -> [n_kv, n_q, n_head].
 ggml_tensor * deberta_c2p_bias(ggml_context * ctx0, ggml_tensor * pos_key,
                                ggml_tensor * Qh, ggml_tensor * c2p_index);
+
+// DeBERTa position-to-content bias. pos_query [d, 2*att_span, n_head],
+// Kh [d, n_kv, n_head], p2c_index [n_q, n_kv, n_head] I32 -> [n_kv, n_q, n_head].
+// p2c_index holds the SAME bucket index as c2p_index for a given (q,k) pair
+// (p2c_index[q,k] == c2p_index[k,q]); only the write axis differs, which is what
+// the ggml_permute below undoes. See deberta_fill_p2c_index.
+ggml_tensor * deberta_p2c_bias(ggml_context * ctx0, ggml_tensor * pos_query,
+                               ggml_tensor * Kh, ggml_tensor * p2c_index);

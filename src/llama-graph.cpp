@@ -3880,3 +3880,16 @@ ggml_tensor * deberta_c2p_bias(ggml_context * ctx0, ggml_tensor * pos_key,
     c2p = ggml_reshape_3d(ctx0, c2p, n_tokens, n_tokens, n_head);         // [n_kv, n_q, H]
     return c2p;
 }
+
+ggml_tensor * deberta_p2c_bias(ggml_context * ctx0, ggml_tensor * pos_query,
+                               ggml_tensor * Kh, ggml_tensor * p2c_index) {
+    const int64_t n_rel_rows = pos_query->ne[1];
+    const int64_t n_tokens   = Kh->ne[1];
+    const int64_t n_head     = Kh->ne[2];
+    ggml_tensor * full = ggml_mul_mat(ctx0, pos_query, Kh);               // [2S, n_k, H]
+    full = ggml_reshape_4d(ctx0, full, 1, n_rel_rows, n_tokens, n_head);  // [1, 2S, n_k, H]
+    ggml_tensor * p2c = ggml_get_rows(ctx0, full, p2c_index);             // [1, n_q, n_kv, H]
+    p2c = ggml_reshape_3d(ctx0, p2c, n_tokens, n_tokens, n_head);         // [n_q, n_kv, H]
+    p2c = ggml_cont(ctx0, ggml_permute(ctx0, p2c, 1, 0, 2, 3));           // [n_kv, n_q, H]
+    return p2c;
+}
