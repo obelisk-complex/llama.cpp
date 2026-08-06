@@ -43,8 +43,29 @@ def build_synthetic(dir_model: pathlib.Path):
     # path below.
     V_SPM = train_spm(dir_model, vocab_size=32)
     V = V_SPM + 4
-    # Task 5a adds added_tokens.json and tokenizer_config.json here, and the
-    # assertions that gate the two base.py blocks reading them.
+    # The real checkpoint's added_tokens.json is {"[MASK]": 128000}: a single
+    # token at the FIRST filler id, with the rest of the tail left as [PAD{i}].
+    # Mirror that shape exactly - MASK_ID at V_SPM, tail at V-1 still [PAD] - so
+    # this fixture gates the added-tokens block and Task 5's filler loop at once.
+    # Without an added_tokens.json here the round-trip cannot see the block's
+    # omission, which is how that defect survived to be found against the real
+    # checkpoint rather than against this test.
+    MASK_ID = V_SPM
+    (dir_model / "added_tokens.json").write_text(json.dumps({"[MASK]": MASK_ID}))
+    # The real checkpoint's tokenizer_config.json names the same token again in
+    # added_tokens_decoder, with special: true. That is what makes [MASK] land
+    # as CONTROL rather than the USER_DEFINED the added_tokens.json block above
+    # assigns it, and it is the only reason the decoder block is worth porting:
+    # without this file here the round-trip cannot tell the two blocks apart.
+    (dir_model / "tokenizer_config.json").write_text(json.dumps({
+        "added_tokens_decoder": {
+            "0": {"content": "[PAD]", "special": True},
+            "1": {"content": "[UNK]", "special": True},
+            "2": {"content": "[CLS]", "special": True},
+            "3": {"content": "[SEP]", "special": True},
+            str(MASK_ID): {"content": "[MASK]", "special": True},
+        }
+    }))
     cfg = {
         "model_type": "deberta-v2", "architectures": ["DebertaV2ForSequenceClassification"],
         "hidden_size": H, "num_hidden_layers": L, "num_attention_heads": Hd,
@@ -90,7 +111,7 @@ def build_synthetic(dir_model: pathlib.Path):
     t["classifier.weight"] = cw
     t["classifier.bias"] = r(NCLS)
     save_file(t, str(dir_model / "model.safetensors"))
-    return {"vocab_size": V, "spm_pieces": V_SPM}
+    return {"vocab_size": V, "spm_pieces": V_SPM, "mask_id": MASK_ID}
 
 def main():
     with tempfile.TemporaryDirectory() as td:
@@ -105,8 +126,16 @@ def main():
         assert kv["general.architecture"].parts[kv["general.architecture"].data[0]].tobytes() == b"deberta"
         assert u32("deberta.attention.position_buckets") == 4
         assert u32("deberta.attention.max_relative_positions") == 16  # resolved from -1
-        # Task 5a adds the special-token contract assertions here (bos/eos/pad/unk
-        # ids and add_bos/add_eos), alongside the added-token ones below.
+        # Special-token contract. The UGM defaults (eos=1, unk=2, pad=0, bos NULL,
+        # add_bos=false) are wrong at both ends for a DeBERTa vocab, so the
+        # converter must write these explicitly. The synthetic spm is trained with
+        # pad 0, unk 1, bos 2, eos 3.
+        assert u32("tokenizer.ggml.bos_token_id") == 2
+        assert u32("tokenizer.ggml.eos_token_id") == 3
+        assert u32("tokenizer.ggml.padding_token_id") == 0
+        assert u32("tokenizer.ggml.unknown_token_id") == 1
+        assert u32("tokenizer.ggml.add_bos_token") == 1
+        assert u32("tokenizer.ggml.add_eos_token") == 1
         # Token list is sized by config vocab_size, not the spm piece count, with
         # the tail filled by [PAD{i}]. The real checkpoint pads 128100 against a
         # smaller spm; without this the filler path would never be exercised.
@@ -116,6 +145,32 @@ def main():
             f'(config vocab_size, not the {dims["spm_pieces"]} spm pieces)')
         last = toks.parts[toks.data[-1]].tobytes()
         assert last.startswith(b"[PAD"), f"tail token is {last!r}, expected a [PAD{{i}}] filler"
+        # added_tokens.json must survive the filler loop. The real checkpoint's
+        # [MASK] sits at the first filler id, and SpecialVocab writes
+        # tokenizer.ggml.mask_token_id pointing at it regardless, so dropping
+        # this block ships a mask id aimed at [PAD{i}] with no other symptom.
+        mask_id = dims["mask_id"]
+        got_mask = toks.parts[toks.data[mask_id]].tobytes()
+        assert got_mask == b"[MASK]", (
+            f"token {mask_id} is {got_mask!r}, expected b'[MASK]' from added_tokens.json; "
+            f"set_vocab dropped conversion/base.py:1885-1897's added-tokens block")
+        # CONTROL, not USER_DEFINED: added_tokens.json types it USER_DEFINED
+        # (base.py:1897) and the tokenizer_config.json decoder block then
+        # re-types it CONTROL because its entry is special: true
+        # (base.py:1913-1914). Both attributes enter cache_special_tokens
+        # (src/llama-vocab.cpp:2977-2979), so tokenisation is identical either
+        # way and no NLI number moves; the difference is detokenisation, where
+        # attr_special = UNKNOWN | CONTROL (:3561) suppresses a CONTROL token in
+        # token_to_piece(special=false) and renders a USER_DEFINED one
+        # literally. USER_DEFINED here means the decoder block was dropped.
+        ttypes = kv["tokenizer.ggml.token_type"]
+        got_type = int(ttypes.parts[ttypes.data[mask_id]])
+        assert got_type == int(gguf.TokenType.CONTROL), (
+            f"token {mask_id} has type {got_type}, expected CONTROL "
+            f"({int(gguf.TokenType.CONTROL)}). USER_DEFINED "
+            f"({int(gguf.TokenType.USER_DEFINED)}) means set_vocab ported "
+            f"conversion/base.py:1885-1897 but not the decoder block at :1899-1920; "
+            f"UNUSED means it dropped both and this is still the filler entry")
         names = {t.name for t in reader.tensors}
         required = {"rel_embd.weight", "rel_embd_norm.weight", "rel_embd_norm.bias",
                     "token_embd.weight", "token_embd_norm.weight", "token_embd_norm.bias",

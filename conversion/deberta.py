@@ -1,9 +1,8 @@
 from __future__ import annotations
 from typing import Callable, Iterable
 from torch import Tensor
-from .base import ModelBase, TextModel, gguf
-# Task 5a adds `import json` and `logger` to these imports; its added-token
-# blocks are the only users of either.
+import json
+from .base import ModelBase, TextModel, gguf, logger
 
 
 # Only the architecture this plan proves end to end. The HF architecture names
@@ -142,14 +141,127 @@ class DebertaV2Model(TextModel):
 
         self.gguf_writer.add_tokenizer_model("t5")   # spm unigram
         self.gguf_writer.add_tokenizer_pre("default")
+
+        # Added tokens, ported from conversion/base.py:1885-1897 (the block the
+        # tokenizer.model helper carries and Task 5's hand-written loop would
+        # otherwise drop, guard included). Line-for-line the same logic; the one
+        # difference is that base.py names the enum SentencePieceTokenTypes
+        # (base.py:61) where this uses gguf.TokenType (constants.py:4932-4938).
+        # The two enums carry identical values and newer base.py code already
+        # mixes them, so this is a naming choice, not a dropped conversion.
+        # DeBERTa-v3's added_tokens.json is {"[MASK]": 128000}, and its
+        # 128000-piece spm against a config vocab_size of 128100 puts 128000
+        # squarely in the filler tail: without this the token ships as
+        # [PAD128000]/UNUSED/-10000 while SpecialVocab still writes
+        # tokenizer.ggml.mask_token_id = 128000 ('mask' is in the default
+        # special_token_types at gguf-py/gguf/vocab.py:74, and add_mask_token_id
+        # exists at gguf_writer.py:1130), so the shipped mask id points at a
+        # filler token. [PAD128000] is the name Task 5's own filler loop gives
+        # id 128000, keyed on the token id; base.py's separate filler loop
+        # (:1922-1926) numbers by count instead, [PAD1] through [PAD{pad_count}].
+        # Both are correct; do not "fix" Task 5's to match base.py's, because
+        # Task 5's tail assertion is written against the id-keyed names.
+        # Inert for NLI, which never emits [MASK]; not inert for the DeBERTa-v3
+        # line this fork is published for.
+        added_tokens_file = self.dir_model / "added_tokens.json"
+        if added_tokens_file.is_file():
+            with open(added_tokens_file, "r", encoding="utf-8") as f:
+                added_tokens_json = json.load(f)
+            for key in added_tokens_json:
+                token_id = added_tokens_json[key]
+                if token_id >= vocab_size:
+                    logger.warning(f"ignore token {token_id}: id is out of range, max={vocab_size - 1}")
+                    continue
+                tokens[token_id] = key.encode("utf-8")
+                scores[token_id] = -1000.0
+                toktypes[token_id] = gguf.TokenType.USER_DEFINED
+
+        # base.py's adjacent tokenizer_config.json / added_tokens_decoder block
+        # (:1899-1920), ported too. It is NOT redundant with Task 5's spm loop:
+        # the validation checkpoint's own tokenizer_config.json carries
+        # added_tokens_decoder = {0:[PAD], 1:[CLS], 2:[SEP], 3:[UNK],
+        # 128000:[MASK]}, every entry special:true, and 128000 is past the
+        # 128000-piece spm - so the decoder names a token the spm does not
+        # carry, and it is [MASK], the same token the added-tokens block above
+        # types USER_DEFINED. base.py:1913-1914 types it CONTROL instead.
+        # does_token_look_special is already on ModelBase (:1318).
+        tokenizer_config_file = self.dir_model / "tokenizer_config.json"
+        if tokenizer_config_file.is_file():
+            with open(tokenizer_config_file, "r", encoding="utf-8") as f:
+                tokenizer_config_json = json.load(f)
+            added_tokens_decoder = tokenizer_config_json.get("added_tokens_decoder", {})
+            for token_id, token_data in added_tokens_decoder.items():
+                token_id = int(token_id)
+                token: str = token_data["content"]
+                if token_id >= vocab_size:
+                    logger.warning(f"ignore token {token_id}: id is out of range, max={vocab_size - 1}")
+                    continue
+                # base.py:1910-1912's warning, ported with the rest. base.py
+                # writes it as a nested if; the `and` below is the same
+                # condition, flattened. Inert on the validation checkpoint (ids
+                # 0-3 carry the same strings the spm does), but it is the only
+                # diagnostic that fires when a fine-tune's added_tokens_decoder
+                # disagrees with its own spm vocabulary - the general DeBERTa-v3
+                # case this port claims to support - and the overwrite two lines
+                # below is silent without it.
+                if toktypes[token_id] != gguf.TokenType.UNUSED and tokens[token_id] != token.encode("utf-8"):
+                    logger.warning(f"replacing token {token_id}: {tokens[token_id].decode('utf-8')!r} -> {token!r}")
+                if token_data.get("special") or self.does_token_look_special(token):
+                    toktypes[token_id] = gguf.TokenType.CONTROL
+                else:
+                    token = token.replace(b"\xe2\x96\x81".decode("utf-8"), " ")
+                    toktypes[token_id] = gguf.TokenType.USER_DEFINED
+                scores[token_id] = -1000.0
+                tokens[token_id] = token.encode("utf-8")
+
         self.gguf_writer.add_token_list(tokens)
         self.gguf_writer.add_token_scores(scores)
         self.gguf_writer.add_token_types(toktypes)
-        # Task 5a continues this method here: the two base.py added-token
-        # blocks, the spm normaliser settings, SpecialVocab, and the explicit
-        # special-token ids. A GGUF written without them loads and tokenises;
-        # it just tokenises wrongly, which is why that half needs its own
-        # assertions rather than sharing this one's.
+
+        # Normaliser settings from spm.model's own normalizer_spec, as
+        # conversion/t5.py:53-55, 112-115 does. precompiled_charsmap is optional
+        # on the C++ side (src/llama-vocab.cpp:2047-2048), so omitting it drops
+        # the spm normaliser silently rather than failing loudly.
+        from sentencepiece import sentencepiece_model_pb2 as spm_pb2
+        proto = spm_pb2.ModelProto()
+        proto.ParseFromString(spm_path.read_bytes())
+        norm = proto.normalizer_spec
+        self.gguf_writer.add_add_space_prefix(norm.add_dummy_prefix)
+        self.gguf_writer.add_remove_extra_whitespaces(norm.remove_extra_whitespaces)
+        if norm.precompiled_charsmap:
+            self.gguf_writer.add_precompiled_charsmap(norm.precompiled_charsmap)
+
+        # SpecialVocab first, explicit ids second: duplicate keys warn and the
+        # last write wins (gguf-py/gguf/gguf_writer.py:277-281).
+        special = gguf.SpecialVocab(self.dir_model, n_vocab=len(tokens))
+        special.add_to_gguf(self.gguf_writer)
+
+        # SpecialVocab alone does NOT establish the special-token contract here.
+        # tokenizer_model "t5" selects LLAMA_VOCAB_TYPE_UGM, whose defaults are
+        # eos=1, unk=2, pad=0 with bos/sep/mask NULL (src/llama-vocab.cpp:2036-2045)
+        # and add_bos=false, add_eos=true (:2412-2415). DeBERTa-v3 is [PAD]=0,
+        # [CLS]=1, [SEP]=2, [UNK]=3, and HF emits "[CLS] ... [SEP]", so leaving
+        # the defaults gives no leading [CLS] and a trailing [CLS]: wrong at both
+        # ends. DeBERTa's tokenizer_config.json names cls_token/sep_token and no
+        # bos/eos, so SpecialVocab writes neither.
+        #
+        # BOS is the carrier for [CLS]: LLM_KV_TOKENIZER_CLS_ID exists
+        # (src/llama-arch.cpp:344) but llama-vocab.cpp never reads it, and gguf-py
+        # has no add_cls_token_id, so SpecialVocab only warns and skips 'cls'
+        # (gguf-py/gguf/vocab.py:89-92).
+        def piece_id(piece: str, default: int) -> int:
+            tid = sp.PieceToId(piece)
+            return tid if tid >= 0 and sp.IdToPiece(tid) == piece else default
+
+        # The defaults are the ids trained into the synthetic fixture's spm
+        # (pad 0, unk 1, bos 2, eos 3); a real DeBERTa-v3 resolves all four by name.
+        self.gguf_writer.add_bos_token_id(piece_id("[CLS]", 2))
+        self.gguf_writer.add_eos_token_id(piece_id("[SEP]", 3))
+        self.gguf_writer.add_sep_token_id(piece_id("[SEP]", 3))
+        self.gguf_writer.add_unk_token_id(piece_id("[UNK]", 1))
+        self.gguf_writer.add_pad_token_id(piece_id("[PAD]", 0))
+        self.gguf_writer.add_add_bos_token(True)   # HF prepends [CLS]
+        self.gguf_writer.add_add_eos_token(True)   # HF appends [SEP]
 
     @classmethod
     def filter_tensors(cls, item: tuple[str, Callable[[], Tensor]]) -> tuple[str, Callable[[], Tensor]] | None:
