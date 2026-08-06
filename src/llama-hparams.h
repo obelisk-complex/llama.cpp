@@ -57,6 +57,12 @@ struct llama_hparams {
     uint32_t n_expert_used = 0;
     uint32_t n_rel_attn_bkts = 0;
 
+    // DeBERTa-v2/v3 disentangled attention. position_buckets is att_span
+    // (rel embedding table has 2*position_buckets rows); max_relative_positions
+    // is stored already resolved to its positive value by the converter.
+    uint32_t position_buckets        = 0;
+    uint32_t max_relative_positions  = 0;
+
     // TODO: this needs to be reworked
     int32_t  n_layer_kv_from_start = -1; // if non-negative, the first n_layer_kv_from_start layers have KV cache
 

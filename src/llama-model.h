@@ -566,6 +566,11 @@ struct llama_model {
     struct ggml_tensor * tok_norm   = nullptr;
     struct ggml_tensor * tok_norm_b = nullptr;
 
+    // DeBERTa shared relative-position embeddings + their (once-applied) LayerNorm
+    struct ggml_tensor * rel_embd        = nullptr;
+    struct ggml_tensor * rel_embd_norm   = nullptr;
+    struct ggml_tensor * rel_embd_norm_b = nullptr;
+
     struct ggml_tensor * output_norm     = nullptr;
     struct ggml_tensor * output_norm_b   = nullptr;
     struct ggml_tensor * output          = nullptr;
