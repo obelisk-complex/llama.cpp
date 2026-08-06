@@ -1,3 +1,6 @@
+// Release builds define NDEBUG, which turns assert() into a no-op; undef it
+// here so this test still checks its assertions under -DCMAKE_BUILD_TYPE=Release.
+#undef NDEBUG
 #include "../src/llama-arch.h"
 #include <cassert>
 #include <cstdio>
