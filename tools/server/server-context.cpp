@@ -2255,7 +2255,16 @@ private:
 
         const int n_embd_out = llama_model_n_embd_out(model_tgt);
 
-        std::vector<float> embd_res(n_embd_out, 0.0f);
+        // RANK pooling yields n_cls_out floats per sequence, not n_embd_out
+        // (src/llama-context.cpp:1529, :1980). Sizing and reading at n_embd_out
+        // over-reads the heap and serialises the garbage into the response;
+        // with the default euclidean norm it also corrupts the real logits,
+        // because the divisor sums over the out-of-bounds reads too.
+        const int n_embd_res = llama_pooling_type(slot.ctx_tgt) == LLAMA_POOLING_TYPE_RANK
+            ? std::min<int>(n_embd_out, (int) llama_model_n_cls_out(model_tgt))
+            : n_embd_out;
+
+        std::vector<float> embd_res(n_embd_res, 0.0f);
 
         for (int i = 0; i < batch.n_tokens; ++i) {
             if (!batch.logits[i] || batch.seq_id[i][0] != slot.id) {
@@ -2272,13 +2281,13 @@ private:
             if (embd == nullptr) {
                 SLT_ERR(slot, "failed to get embeddings, token = %d, seq_id = %d\n", batch.token[i], batch.seq_id[i][0]);
 
-                res->embedding.push_back(std::vector<float>(n_embd_out, 0.0f));
+                res->embedding.push_back(std::vector<float>(n_embd_res, 0.0f));
                 continue;
             }
 
             // normalize only when there is pooling
             if (llama_pooling_type(slot.ctx_tgt) != LLAMA_POOLING_TYPE_NONE) {
-                common_embd_normalize(embd, embd_res.data(), n_embd_out, slot.task->params.embd_normalize);
+                common_embd_normalize(embd, embd_res.data(), n_embd_res, slot.task->params.embd_normalize);
                 res->embedding.push_back(embd_res);
                 break;
             }

@@ -37,6 +37,15 @@ static void batch_add_seq(llama_batch & batch, const std::vector<int32_t> & toke
 static void batch_decode(llama_context * ctx, llama_batch & batch, float * output, int n_seq, int n_embd_out, int embd_norm) {
     const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
 
+    // RANK pooling sizes each sequence buffer at n_cls_out floats
+    // (src/llama-context.cpp:1529, :1980), so reading n_embd_out of them
+    // over-reads the heap. Clamp the count; the stride below must stay
+    // n_embd_out, because print_raw_embeddings indexes `output` with it.
+    const llama_model * model = llama_get_model(ctx);
+    const int n_embd_read = pooling_type == LLAMA_POOLING_TYPE_RANK
+        ? std::min<int>(n_embd_out, (int) llama_model_n_cls_out(model))
+        : n_embd_out;
+
     // clear previous kv_cache values (irrelevant for embeddings)
     llama_memory_clear(llama_get_memory(ctx), true);
 
@@ -66,8 +75,8 @@ static void batch_decode(llama_context * ctx, llama_batch & batch, float * outpu
             GGML_ASSERT(embd != NULL && "failed to get sequence embeddings");
         }
 
-        float * out = output + embd_pos * n_embd_out;
-        common_embd_normalize(embd, out, n_embd_out, embd_norm);
+        float * out = output + embd_pos * n_embd_out;   // stride unchanged
+        common_embd_normalize(embd, out, n_embd_read, embd_norm);
     }
 }
 
