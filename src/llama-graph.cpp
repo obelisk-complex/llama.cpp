@@ -3841,7 +3841,8 @@ void deberta_fill_c2p_index(int32_t * dst, const llama_pos * pos, int64_t n_toke
         for (int64_t k = 0; k < n_tokens; ++k) {
             const int32_t b = deberta_relative_position_bucket(pos[q] - pos[k], position_buckets, max_position);
             int32_t c = b + span;
-            if (c < 0) c = 0; if (c > 2*span - 1) c = 2*span - 1;
+            if (c < 0) { c = 0; }
+            if (c > 2*span - 1) { c = 2*span - 1; }
             dst[k + q * n_tokens] = c; // ne0 = key, ne1 = query
         }
     }
@@ -3859,7 +3860,8 @@ void deberta_fill_p2c_index(int32_t * dst, const llama_pos * pos, int64_t n_toke
             // section; this was settled by an A/B against HF, not by reading it.
             const int32_t b = deberta_relative_position_bucket(pos[q] - pos[k], position_buckets, max_position);
             int32_t p = b + span;
-            if (p < 0) p = 0; if (p > 2*span - 1) p = 2*span - 1;
+            if (p < 0) { p = 0; }
+            if (p > 2*span - 1) { p = 2*span - 1; }
             dst[q + k * n_tokens] = p; // ne0 = query, ne1 = key (transposed vs c2p)
         }
     }

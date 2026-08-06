@@ -235,7 +235,7 @@ public:
     ggml_tensor * c2p_index = nullptr; // [n_tokens, n_tokens, n_head] I32
     ggml_tensor * p2c_index = nullptr;
 
-    const llama_hparams & hparams;
+    const llama_hparams hparams;
 };
 
 class llm_graph_input_out_ids : public llm_graph_input_i {
