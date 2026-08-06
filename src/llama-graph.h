@@ -1376,3 +1376,8 @@ void deberta_fill_c2p_index(int32_t * dst, const llama_pos * pos, int64_t n_toke
                             int64_t n_head, int32_t position_buckets, int32_t max_position);
 void deberta_fill_p2c_index(int32_t * dst, const llama_pos * pos, int64_t n_tokens,
                             int64_t n_head, int32_t position_buckets, int32_t max_position);
+
+// DeBERTa content-to-position bias. pos_key [d, 2*att_span, n_head],
+// Qh [d, n_q, n_head], c2p_index [n_kv, n_q, n_head] I32 -> [n_kv, n_q, n_head].
+ggml_tensor * deberta_c2p_bias(ggml_context * ctx0, ggml_tensor * pos_key,
+                               ggml_tensor * Qh, ggml_tensor * c2p_index);

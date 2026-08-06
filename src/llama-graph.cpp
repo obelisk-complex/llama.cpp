@@ -3868,3 +3868,15 @@ void deberta_fill_p2c_index(int32_t * dst, const llama_pos * pos, int64_t n_toke
     for (int64_t h = 1; h < n_head; ++h)
         std::memcpy(dst + h*n_tokens*n_tokens, dst, n_tokens*n_tokens*sizeof(int32_t));
 }
+
+ggml_tensor * deberta_c2p_bias(ggml_context * ctx0, ggml_tensor * pos_key,
+                               ggml_tensor * Qh, ggml_tensor * c2p_index) {
+    const int64_t n_rel_rows = pos_key->ne[1]; // 2*att_span
+    const int64_t n_tokens   = Qh->ne[1];
+    const int64_t n_head     = Qh->ne[2];
+    ggml_tensor * full = ggml_mul_mat(ctx0, pos_key, Qh);                 // [2S, n_q, H]
+    full = ggml_reshape_4d(ctx0, full, 1, n_rel_rows, n_tokens, n_head);  // [1, 2S, n_q, H]
+    ggml_tensor * c2p = ggml_get_rows(ctx0, full, c2p_index);             // [1, n_kv, n_q, H]
+    c2p = ggml_reshape_3d(ctx0, c2p, n_tokens, n_tokens, n_head);         // [n_kv, n_q, H]
+    return c2p;
+}
