@@ -1,8 +1,8 @@
 # llama.cpp
 
 > [!NOTE]
-> **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-rerank-patches`) maintained for the
-> [wikiq](https://github.com/obelisk-complex/wikiq) project. Branched from release `b10046`, rebased
+> **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-patches-b10288`) maintained for the
+> wikiq project. Branched from release `b10046`, rebased
 > 2026-08-05 onto `b10288` (242 upstream commits of drift; one inert enum-slot renumber was the only
 > conflict). It carries:
 >
@@ -33,8 +33,7 @@
 >      score compression. Loader (`src/models/jina-bert-v2.cpp`) now supports both the single-tensor
 >      direct-projection layout and this pooler-style two-tensor layout; the GGUF itself still needs
 >      rebuilding to supply the missing tensors: see
->      [`scripts/fix-rerank-gguf.py`](https://github.com/obelisk-complex/wikiq/blob/master/scripts/fix-rerank-gguf.py)
->      in the wikiq repo.
+>      [`scripts/wikiq/fix-rerank-gguf.py`](scripts/wikiq/fix-rerank-gguf.py).
 >   2. **Tokeniser:** `jina-v1-en` was sharing `GPT2`'s byte-level pre-tokeniser with unrelated
 >      tokeniser families, silently dropping every uppercase codepoint ("Which" tokenised as if it read
 >      "hich") and mis-splitting mixed alphanumerics ("v2", "m3"). Any query or document with capitals
@@ -69,8 +68,8 @@
 > also emits all-zero token-type ids for this architecture). A separate, smaller data issue remains in
 > the model's public GGUF conversion (missing `tokenizer.ggml.add_sep_token`, same class of bug as the
 > jina fixes above) - see
-> [`scripts/fix-bge-rerank-gguf.py`](https://github.com/obelisk-complex/wikiq/blob/master/scripts/fix-bge-rerank-gguf.py)
-> in the wikiq repo. `bge-reranker-v2-m3` is not wikiq's pinned reranker; this is a fork correctness fix
+> [`scripts/wikiq/fix-bge-rerank-gguf.py`](scripts/wikiq/fix-bge-rerank-gguf.py).
+> `bge-reranker-v2-m3` is not wikiq's pinned reranker; this is a fork correctness fix
 > found along the way, not evidence wikiq uses this model.
 >
 > **DeBERTa-v3 support (`LLM_ARCH_DEBERTA`).** This is the reason to pin the fork rather than build
@@ -143,6 +142,42 @@
 > nothing after them. This bug is upstream's, present at `b10288`, and it reaches any RANK-pooled
 > model on any architecture; it is carried as its own commit for that reason. `/v1/rerank` is
 > served by `send_rerank`, which reads `embd[0]` alone, and is unaffected.
+>
+> **Checking the fixes yourself.** Every claim above is a before-and-after you can run. Build stock
+> and this fork from the same base, convert the same model, and compare:
+> ```console
+> git clone https://github.com/obelisk-complex/llama.cpp && cd llama.cpp
+> git checkout b10288 && cmake -B build-stock && cmake --build build-stock -j"$(nproc)"
+> git checkout wikiq-b10288-deberta-v1 && cmake -B build-fork && cmake --build build-fork -j"$(nproc)"
+> ```
+> For the jina and bge rerank fixes, the difference is numerical and needs a repaired GGUF, because
+> the official conversions are missing tensors the fixes rely on:
+> ```console
+> python3 scripts/wikiq/fix-rerank-gguf.py <official-jina-gguf> <output-gguf>
+> ./build-stock/bin/llama-server --rerank -m <output-gguf> --port 8080
+> ./build-fork/bin/llama-server  --rerank -m <output-gguf> --port 8081
+> ```
+> Score the same query and documents against both and compare the raw scores and the resulting
+> order against the model's own HF forward pass. Stock compresses the range and reorders; this
+> fork does not. The four causes are itemised above, so a disagreement can be attributed rather
+> than just observed.
+>
+> For DeBERTa there is no such pair to run, for the reason given above: stock produces no GGUF to
+> serve. The eight `test-deberta-*` ctest targets are the check that runs here. Fidelity against
+> the real HF forward pass is gated outside this repository, on a fixture of 8 premise-hypothesis
+> pairs scored through `/v1/embeddings`: all three logits of every pair agree with the HF reference
+> to within `5e-2`, with a largest observed gap of `~4.77e-5` across the 24 comparisons.
+>
+> **Pinning this fork.** Pin a **tag**. Tags here are immutable and namespaced `wikiq-<upstream
+> base>-<what it adds>-v<n>`, because this fork inherited upstream's whole tag namespace and a bare
+> `v1` would be indistinguishable from it. The current release is `wikiq-b10288-deberta-v1`, cut at
+> a commit that passed the full conformance gate.
+>
+> **Branches move, and are not a supported pinning unit.** Work happens on one branch per upstream
+> base, `wikiq-patches-b10288` today. Rebasing onto a newer upstream release creates a new branch
+> beside it, `wikiq-patches-b1xxxx`, rather than force-pushing over this one, so an existing pin
+> keeps resolving and the branch name tells you which upstream release you are on. The default
+> branch follows the newest of these, so it changes too.
 >
 > See commit `d191d0f` for the full technical writeup of the jina-bert-v2 fixes, `f7127b2` for an
 > unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path, and `9c51923` for the
