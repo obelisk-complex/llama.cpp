@@ -97,7 +97,9 @@
 > true`; `relative_attention: false`; `share_att_key: false`, since the graph projects the
 > relative embeddings through each layer's own `Wq`/`Wk`; any `norm_rel_ebd` other than
 > `layer_norm`; any `type_vocab_size` other than 0, so no segment embeddings; any `pos_att_type`
-> other than p2c plus c2p; and any `pooler_hidden_act` other than `gelu`. CPU-only and f32 in v1:
+> other than p2c plus c2p; and both GELU activations, which are hardcoded separately and refused
+> separately - any `hidden_act` other than `gelu` for the encoder FFN, and any `pooler_hidden_act`
+> other than `gelu` for the `ContextPooler`. CPU-only and f32 in v1:
 > no quantised path and no Vulkan or ROCm shader work.
 >
 > **Converting and serving.**

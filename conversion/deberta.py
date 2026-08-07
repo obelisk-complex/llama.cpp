@@ -90,6 +90,11 @@ class DebertaV2Model(TextModel):
             raise ValueError(
                 f"segment embeddings are unsupported by this DeBERTa port "
                 f"(type_vocab_size={self.hparams.get('type_vocab_size')})")
+        if self.hparams.get("hidden_act", "gelu") != "gelu":
+            raise ValueError(
+                f"the DeBERTa graph hardcodes the erf GELU FFN activation "
+                f"(src/models/deberta.cpp's LLM_FFN_GELU_ERF); "
+                f"got hidden_act={self.hparams.get('hidden_act')!r}")
         if self.hparams.get("pooler_hidden_act", "gelu") != "gelu":
             raise ValueError(
                 f"build_pooling's DeBERTa branch hardcodes the erf GELU ContextPooler "
