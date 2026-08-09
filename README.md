@@ -1,35 +1,63 @@
 # llama.cpp
 
 > [!NOTE]
-> **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-patches-b10288`) maintained for the
-> wikiq project. Branched from release `b10046`, rebased
-> 2026-08-05 onto `b10288` (242 upstream commits of drift; one inert enum-slot renumber was the only
-> conflict). It carries:
+> **This is a fork** (`obelisk-complex/llama.cpp`, branch `wikiq-patches-b10288`), rebased onto each
+> new upstream release and carrying a handful of real fixes upstream doesn't have yet, plus one model
+> type upstream can't run at all.
+>
+> **Reranking with `jina-reranker-v1-turbo-en` (and its `jina-bert-v2` siblings) now matches what the
+> model actually intends.** On upstream llama.cpp, this reranker runs cleanly, with no error or
+> warning, and still gets the order wrong: a document the model would confidently put first can come
+> back in third or fourth place instead. Nothing about the failure looks broken from the outside - it
+> just quietly hands you a different answer than the one you'd get running the model the way its own
+> authors intended. This fork traces the mismatch back to its real causes and fixes them, checked
+> directly against the model's own reference behaviour rather than assumed correct because nothing
+> crashed. See "Technical details" below for exactly what was wrong.
+>
+> **Other single-segment `BERT`-style rerankers, such as `bge-reranker-v2-m3`, no longer crash
+> outright.** Upstream assumes every reranker in this family has a certain internal structure that
+> some, including this one, don't have; where that assumption is wrong, upstream either aborts or, on
+> some hardware, reads memory it shouldn't. This isn't the reranker this fork's maintainer runs day to
+> day - it's a real bug found while chasing the issue above, fixed because it would hit anyone using
+> this kind of model.
+>
+> **`DeBERTa-v3` classifier models now convert and run at all.** Upstream has no support for this
+> model family: pointing its converter at one fails immediately, before anything usable comes out the
+> other end. This fork adds what's missing, so a fine-tuned `DeBERTa-v3` classifier - the kind of
+> model used to check whether one piece of text is genuinely backed up by another, rather than just
+> superficially related to it - can run locally instead of going out to a hosted service every time.
+> See "Technical details" for exactly what's supported and what's deliberately refused.
+>
+> **A separate, unrelated bug: classifier-style output could come back silently corrupted.** Any
+> model served with this fork's rank-style output mode could, on affected upstream builds, have part
+> of its answer overwritten with memory it should never have read - and the corruption wasn't limited
+> to the extra, unused part of the output; the real numbers came back wrong too. Fixed here,
+> independent of anything above.
+>
+> <details>
+> <summary><b>Technical details</b></summary>
+>
+> **Fork basics.** Branched from release `b10046`, rebased 2026-08-05 onto `b10288` (242 upstream
+> commits of drift; one inert enum-slot renumber was the only conflict). Carries:
 >
 > - **A DeBERTa-v3 port (`LLM_ARCH_DEBERTA`).** Disentangled attention, the DeBERTa `ContextPooler`
 >   classification head, and a `conversion/deberta.py` converter. Unlike the rerank fixes below this
 >   closes a capability gap, not a fidelity one: stock llama.cpp has no DeBERTa architecture, so a
->   checkpoint fails during conversion and there is no GGUF to serve at all. It exists for wikiq's
->   NLI entailment scorer, the audit layer that checks whether a cited chunk actually entails the
->   claim written from it; the strongest candidates for that job are DeBERTa-v3 cross-encoders, and
->   wikiq runs air-gapped, so it has to run locally rather than behind an API. See below.
+>   checkpoint fails during conversion and there is no GGUF to serve at all.
 > - Upstream PR [ggml-org/llama.cpp#21729](https://github.com/ggml-org/llama.cpp/pull/21729) (squashed): adds `token_type_ids` input for rerank models with type-embedding.
 > - Upstream PR [ggml-org/llama.cpp#25448](https://github.com/ggml-org/llama.cpp/pull/25448) (cherry-picked): causal-LM reranker support via logit-margin scoring.
 > - Four local rerank-fidelity fixes for `jina-bert-v2` (jinaai/jina-reranker-v1-turbo-en and siblings).
-> - A fifth local fix for a crash on `bge-reranker-v2-m3` and other single-token-type BERT-arch rerankers, found while diagnosing what wikiq's own README called "order corruption" and turned out to be worse.
+> - A fifth local fix for a crash on `bge-reranker-v2-m3` and other single-token-type BERT-arch rerankers, found while diagnosing a reported reranker order-corruption issue that turned out to be worse: a crash, not a subtler reordering.
 > - A sixth local fix: #21729's `token_type` decode divided by zero on an empty vocab and skipped the null-batch guard its sibling validation loop has, crashing (SIGFPE / SIGSEGV) rather than rejecting or defaulting cleanly. Found by the rebase's own test suite, not by rerank use - unrelated to the four fidelity fixes above.
 >
-> **Why:** wikiq uses jina-reranker-v1-turbo-en as its rerank stage, the step that takes a first-pass
-> retrieval and puts the actually-relevant documents at the top before they're shown to a user or fed
-> to an LLM. On stock llama.cpp + the official `ggml-org/jina-reranker-v1-turbo-en-GGUF` conversion,
-> this stage was silently wrong: no crash, no error, no NaN; it just returned a confidently
-> plausible-looking ranking that didn't match what the actual model would say. Raw scores were
-> compressed into a narrow band (real range ~0.04-0.20, llama.cpp was returning ~0.06-0.08 for
-> everything) and the resulting order was scrambled hard enough that the top real match (per the real
-> model) could land in 3rd or 4th place. A wikiq CI gate that diffs live rerank order against genuine
-> HF reference scores (rather than trusting llama.cpp's output on faith) is what caught this; nothing
-> upstream flagged it, and a search of ggml-org/llama.cpp's issues/PRs at the time found no existing
-> report of any of the four causes below.
+> **jina-reranker-v1-turbo-en: why it was wrong.** On stock llama.cpp plus the official
+> `ggml-org/jina-reranker-v1-turbo-en-GGUF` conversion, raw scores were compressed into a narrow band
+> (real range ~0.04-0.20, llama.cpp was returning ~0.06-0.08 for everything) and the resulting order
+> was scrambled hard enough that the top real match (per the real model) could land in 3rd or 4th
+> place. A CI gate that diffs live rerank order against genuine HF reference scores, rather than
+> trusting llama.cpp's output on faith, is what caught this; nothing upstream flagged it, and a
+> search of ggml-org/llama.cpp's issues/PRs at the time found no existing report of any of the four
+> causes below.
 >
 > **What was actually wrong**, most-to-least impactful:
 >   1. **Classification head layout.** The official GGUF conversion omits the `pooler.dense` layer HF's
@@ -56,30 +84,24 @@
 >      to the mismatch. New `LLM_FFN_GELU_ERF`/`LLM_FFN_GEGLU_ERF` ops (`src/llama-graph.{h,cpp}`), used
 >      only by `LLM_ARCH_JINA_BERT_V2`.
 >
-> **What this fixes in practice:** jina-reranker-v1-turbo-en can now actually be trusted as a rerank
-> stage on this fork, verified against the real HF forward pass rather than assumed correct because it
-> runs without error. Live scores agree with the real HF reference within ±0.005 (raw logit) and rank
-> order matches exactly on wikiq's conformance fixture, including a near-tied pair the pre-fix build
-> got wrong.
+> **Result:** live scores agree with the real HF reference within ±0.005 (raw logit) and rank order
+> matches exactly on this fork's own conformance fixture, including a near-tied pair the pre-fix
+> build got wrong.
 >
-> **A fifth, separate fix: `bge-reranker-v2-m3` crashed on every rerank request.** PR #21729's document
-> token-type marking assumes any `LLM_ARCH_BERT` model has a second token-type row; `bge-reranker-v2-m3`
-> (XLM-RoBERTa-based, `type_vocab_size = 1`) does not, so the marking indexed past the end of a
-> single-row embedding table: `GGML_ASSERT` abort on CPU, silent out-of-bounds reads on backends
-> without that check. This is the actual failure mode behind wikiq's own "order corruption on some
-> backends" description; a crash, not a subtler reordering. Fixed by gating the marking on
-> `vocab->n_token_types() > 1` (`tools/server/server-common.cpp`) so true two-segment BERT rerankers
-> keep #21729's original behaviour and single-type-vocab models match their own HF reference (which
-> also emits all-zero token-type ids for this architecture). A separate, smaller data issue remains in
-> the model's public GGUF conversion (missing `tokenizer.ggml.add_sep_token`, same class of bug as the
-> jina fixes above) - see
-> [`scripts/wikiq/fix-bge-rerank-gguf.py`](scripts/wikiq/fix-bge-rerank-gguf.py).
-> `bge-reranker-v2-m3` is not wikiq's pinned reranker; this is a fork correctness fix
-> found along the way, not evidence wikiq uses this model.
+> **`bge-reranker-v2-m3` crash, the fifth fix.** PR #21729's document token-type marking assumes any
+> `LLM_ARCH_BERT` model has a second token-type row; `bge-reranker-v2-m3` (XLM-RoBERTa-based,
+> `type_vocab_size = 1`) does not, so the marking indexed past the end of a single-row embedding
+> table: `GGML_ASSERT` abort on CPU, silent out-of-bounds reads on backends without that check.
+> Fixed by gating the marking on `vocab->n_token_types() > 1` (`tools/server/server-common.cpp`) so
+> true two-segment BERT rerankers keep #21729's original behaviour and single-type-vocab models match
+> their own HF reference (which also emits all-zero token-type ids for this architecture). A separate,
+> smaller data issue remains in the model's public GGUF conversion (missing
+> `tokenizer.ggml.add_sep_token`, same class of bug as the jina fixes above) - see
+> [`scripts/wikiq/fix-bge-rerank-gguf.py`](scripts/wikiq/fix-bge-rerank-gguf.py). `bge-reranker-v2-m3`
+> is not the reranker this fork's maintainer runs day to day; this is a fork correctness fix found
+> along the way.
 >
-> **DeBERTa-v3 support (`LLM_ARCH_DEBERTA`).** This is the reason to pin the fork rather than build
-> upstream: stock llama.cpp has no DeBERTa architecture, and a DeBERTa checkpoint stops at
-> `Model DebertaV2ForSequenceClassification is not supported`. The fork adds the architecture, its
+> **DeBERTa-v3 support (`LLM_ARCH_DEBERTA`), how it's built.** The fork adds the architecture, its
 > position-bucket GGUF metadata keys and relative-embedding tensors, DeBERTa's own log-bucket
 > relative-position arithmetic (`make_log_bucket_position`, `ceil`-based and signed, distinct from
 > T5's `floor`-based bucketing and not interchangeable with it), a `conversion/deberta.py` converter
@@ -118,7 +140,7 @@
 > the classifier logits into a unit vector: no error, no warning, just plausible numbers that are
 > not the model's. `llama-embedding` has the same default and the same remedy,
 > `--embd-normalize -1`. Under `--pooling rank` the response carries exactly `n_cls_out` values,
-> three for a 3-way NLI head.
+> three for a 3-way classifier head.
 >
 > **Tests.** Eight `test-deberta-*` ctest targets cover the architecture registration, the bucket
 > arithmetic, the index invariant, the c2p and p2c bias terms, the conversion round-trip, the
@@ -190,10 +212,12 @@
 > unrelated interaction bug between PR #21729 and the DeepSeek-v4 code path, and `9c51923` for the
 > bge-reranker-v2-m3 crash fix.
 >
-> This fork is publicly available so it can be pinned as a dependency. It is maintained for wikiq's
-> use rather than as a source of upstream PRs: the work here is AI-assisted well beyond what
-> [`AGENTS.md`](AGENTS.md) accepts in a contribution, and none of it is offered for upstream to
-> maintain.
+> </details>
+>
+> This fork is publicly available so it can be pinned as a dependency. It is maintained for the
+> author's personal use rather than as a source of upstream PRs: the work here is AI-assisted well
+> beyond what [`AGENTS.md`](AGENTS.md) accepts in a contribution, and none of it is offered for
+> upstream to maintain.
 
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
