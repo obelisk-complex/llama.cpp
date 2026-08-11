@@ -437,6 +437,11 @@ int main(int argc, char ** argv) {
     LOG("\n");
     llama_perf_context_print(ctx);
 
+    // make sure all logs are flushed before exit; the worker thread in
+    // common_log runs the print asynchronously and a normal return here
+    // can race it, dropping the embedding output entirely
+    common_log_pause(common_log_main());
+
     // clean up
     llama_batch_free(batch);
     llama_backend_free();
